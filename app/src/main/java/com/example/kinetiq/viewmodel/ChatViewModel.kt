@@ -1,5 +1,6 @@
 package com.example.kinetiq.viewmodel
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.kinetiq.models.Message
@@ -13,6 +14,7 @@ import javax.inject.Inject
 data class ChatUiState(
     val messages: List<Message> = emptyList(),
     val isLoading: Boolean = false,
+    val isUploading: Boolean = false,
     val error: String? = null
 )
 
@@ -48,6 +50,25 @@ class ChatViewModel @Inject constructor(
         val patientId = currentPatientId ?: return
         viewModelScope.launch {
             chatRepo.sendMessage(patientId, content)
+        }
+    }
+
+    fun sendFile(uri: Uri, fileName: String, type: MessageType) {
+        val patientId = currentPatientId ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isUploading = true) }
+            chatRepo.uploadFile(uri, fileName).onSuccess { downloadUrl ->
+                chatRepo.sendMessage(
+                    receiverId = patientId,
+                    content = if (type == MessageType.PHOTO) "[Image]" else "[Document: $fileName]",
+                    type = type,
+                    fileUrl = downloadUrl,
+                    fileName = fileName
+                )
+                _uiState.update { it.copy(isUploading = false) }
+            }.onFailure { err ->
+                _uiState.update { it.copy(error = "Upload failed: ${err.message}", isUploading = false) }
+            }
         }
     }
 }

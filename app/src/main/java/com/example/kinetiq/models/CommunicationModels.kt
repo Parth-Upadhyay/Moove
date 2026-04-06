@@ -10,13 +10,16 @@ data class Message(
     val conversationId: String = "",
     val content: String = "",
     val type: MessageType = MessageType.TEXT,
+    val fileUrl: String? = null,
+    val fileName: String? = null,
+    val fileSize: Long? = null,
     @ServerTimestamp
     val timestamp: Date? = null,
     val metadata: Map<String, String> = emptyMap()
 )
 
 enum class MessageType {
-    TEXT, VOICE, PHOTO, SESSION_SHARE
+    TEXT, VOICE, PHOTO, DOCUMENT, SESSION_SHARE
 }
 
 data class RecoveryJournal(

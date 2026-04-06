@@ -1,5 +1,8 @@
 package com.example.kinetiq.ui.dashboard
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,16 +12,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
 import com.example.kinetiq.models.Message
+import com.example.kinetiq.models.MessageType
 import com.example.kinetiq.viewmodel.ChatViewModel
 import com.google.firebase.auth.FirebaseAuth
 import java.text.SimpleDateFormat
@@ -36,6 +44,18 @@ fun ChatScreen(
     var messageText by remember { mutableStateOf("") }
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     val listState = rememberLazyListState()
+
+    val imageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.sendFile(it, "image.jpg", MessageType.PHOTO) }
+    }
+
+    val docLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.sendFile(it, "document.pdf", MessageType.DOCUMENT) }
+    }
 
     LaunchedEffect(otherUserId) {
         viewModel.setPatient(otherUserId)
@@ -89,6 +109,10 @@ fun ChatScreen(
                 }
             }
 
+            if (state.isUploading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
             Surface(
                 tonalElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth()
@@ -100,6 +124,33 @@ fun ChatScreen(
                         .imePadding(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    var showAttachmentMenu by remember { mutableStateOf(false) }
+
+                    Box {
+                        IconButton(onClick = { showAttachmentMenu = true }) {
+                            Icon(Icons.Default.Add, contentDescription = "Attach")
+                        }
+                        DropdownMenu(
+                            expanded = showAttachmentMenu,
+                            onDismissRequest = { showAttachmentMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Image") },
+                                onClick = {
+                                    showAttachmentMenu = false
+                                    imageLauncher.launch("image/*")
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Document") },
+                                onClick = {
+                                    showAttachmentMenu = false
+                                    docLauncher.launch("application/*")
+                                }
+                            )
+                        }
+                    }
+
                     TextField(
                         value = messageText,
                         onValueChange = { messageText = it },
@@ -149,7 +200,7 @@ fun MessageBubble(message: Message, isCurrentUser: Boolean) {
         if (message.timestamp != null) {
             SimpleDateFormat("HH:mm", Locale.getDefault()).format(message.timestamp)
         } else {
-            "..." // Show dots while the server timestamp is being generated
+            "..."
         }
     }
 
@@ -162,11 +213,42 @@ fun MessageBubble(message: Message, isCurrentUser: Boolean) {
                     .padding(vertical = 8.dp, horizontal = 12.dp)
                     .widthIn(max = 280.dp)
             ) {
-                Text(
-                    text = message.content,
-                    color = contentColor,
-                    fontSize = 16.sp
-                )
+                Column {
+                    when (message.type) {
+                        MessageType.PHOTO -> {
+                            AsyncImage(
+                                model = message.fileUrl,
+                                contentDescription = "Image message",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        MessageType.DOCUMENT -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(4.dp)
+                            ) {
+                                Icon(Icons.Default.Description, contentDescription = null, tint = contentColor)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = message.fileName ?: "Document",
+                                    color = contentColor,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+                        else -> {
+                            Text(
+                                text = message.content,
+                                color = contentColor,
+                                fontSize = 16.sp
+                            )
+                        }
+                    }
+                }
             }
             Text(
                 text = timeString,
