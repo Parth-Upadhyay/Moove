@@ -6,75 +6,59 @@ import kotlin.math.*
 
 class PendulumExercise : Exercise {
     private var repCount = 0
-    private var state = State.NEUTRAL
-    
-    // EMA Smoothing
-    private val alpha = 0.2
-    private var smoothedTorsoAngle = 0.0
-    private var smoothedShoulderAngle = 0.0
-    
-    // Circle tracking
-    private val historyX = mutableListOf<Float>()
-    private val historyY = mutableListOf<Float>()
-    private val HISTORY_SIZE = 30
-
-    private enum class State { NEUTRAL, SWINGING }
+    private var maxAngle = 0.0
+    private var crossedLeft = false
+    private var crossedRight = false
+    private var peakAngleThisRep = 0.0
 
     override fun processFrame(input: SessionInput): ExerciseResult {
         val side = input.prescription.side
         val shoulder = input.keypoints["${side}_shoulder"]
-        val hip = input.keypoints["${side}_hip"]
-        val elbow = input.keypoints["${side}_elbow"]
         val wrist = input.keypoints["${side}_wrist"]
 
-        if (shoulder == null || hip == null || elbow == null || wrist == null) {
+        if (shoulder == null || wrist == null) {
             return ExerciseResult(repCount, "invalid", reason = "Keypoints missing")
         }
 
-        // 1. Calculate Angles
-        val torsoAngle = abs(Math.toDegrees(atan2((shoulder.x - hip.x).toDouble(), (hip.y - shoulder.y).toDouble())))
-        val shoulderAngle = PoseMath.calculateAngle(hip, shoulder, elbow)
-
-        // 2. EMA Smoothing
-        smoothedTorsoAngle = alpha * torsoAngle + (1 - alpha) * smoothedTorsoAngle
-        smoothedShoulderAngle = alpha * shoulderAngle + (1 - alpha) * smoothedShoulderAngle
-
-        // 3. Strict Validation
-        if (smoothedTorsoAngle < 30.0) {
-            return ExerciseResult(repCount, "invalid", incorrect_joints = listOf("torso"), reason = "Stand with your back more parallel to the floor")
-        }
-        if (smoothedShoulderAngle > 25.0) {
-            return ExerciseResult(repCount, "invalid", incorrect_joints = listOf("shoulder"), reason = "Keep your shoulder relaxed — let the arm hang")
-        }
-
-        // 4. Circle Detection
-        historyX.add(wrist.x)
-        historyY.add(wrist.y)
-        if (historyX.size > HISTORY_SIZE) {
-            historyX.removeAt(0)
-            historyY.removeAt(0)
-        }
-
-        val rangeX = (historyX.maxOrNull() ?: 0f) - (historyX.minOrNull() ?: 0f)
-        val rangeY = (historyY.maxOrNull() ?: 0f) - (historyY.minOrNull() ?: 0f)
+        val verticalPoint = com.example.kinetiq.models.Keypoint(shoulder.x, shoulder.y + 1.0f, shoulder.z)
+        val currentAngle = PoseMath.calculateAngle(verticalPoint, shoulder, wrist)
         
-        if (rangeX > 0.4f || rangeY > 0.4f) {
-             return ExerciseResult(repCount, "invalid", incorrect_joints = listOf("wrist"), reason = "Small controlled circles only")
+        if (currentAngle > maxAngle) {
+            maxAngle = currentAngle
+        }
+        
+        if (currentAngle > peakAngleThisRep) {
+            peakAngleThisRep = currentAngle
         }
 
-        val isMoving = rangeX > 0.05f && rangeY > 0.05f
-        when (state) {
-            State.NEUTRAL -> if (isMoving) state = State.SWINGING
-            State.SWINGING -> {
-                if (historyX.size == HISTORY_SIZE && isMoving) {
-                    repCount++
-                    historyX.clear()
-                    historyY.clear()
-                    state = State.NEUTRAL
-                }
-            }
+        val isLeft = wrist.x < shoulder.x
+        val isRight = wrist.x > shoulder.x
+
+        if (isLeft) crossedLeft = true
+        if (isRight) crossedRight = true
+
+        if (crossedLeft && crossedRight) {
+            repCount++
+            crossedLeft = false
+            crossedRight = false
+            peakAngleThisRep = 0.0
         }
 
-        return ExerciseResult(repCount, "valid")
+        val incorrectJoints = mutableListOf<String>()
+        if (currentAngle > 5.0 && peakAngleThisRep < 15.0) {
+            incorrectJoints.add("${side}_wrist")
+        }
+
+        // Peak Motion = max angle achieved
+        val peakMotionValue = maxAngle
+
+        return ExerciseResult(
+            repCount = repCount,
+            status = if (incorrectJoints.isNotEmpty()) "invalid" else "valid",
+            severity = if (incorrectJoints.isNotEmpty()) Severity.WARNING else Severity.NONE,
+            currentRom = currentAngle,
+            peakMotion = peakMotionValue,
+            incorrect_joints = incorrectJoints
+        )
     }
 }

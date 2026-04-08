@@ -13,7 +13,8 @@ data class ExerciseResult(
     val reason: String? = null,
     val currentRom: Double? = null,
     val holdCountdown: Int? = null,
-    val severity: Severity = Severity.NONE
+    val severity: Severity = Severity.NONE,
+    val peakMotion: Double = 0.0
 )
 
 enum class Severity {

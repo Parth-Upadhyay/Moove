@@ -8,7 +8,7 @@ object ProtocolManager {
         STAGE_1(1, listOf("pendulum"), 4),
         STAGE_2(2, listOf("pendulum", "crossover"), 5),
         STAGE_3(3, listOf("pendulum", "crossover", "external_rotation"), 5),
-        STAGE_4(4, listOf("pendulum", "crossover", "external_rotation", "wall_climb"), 6)
+        STAGE_4(4, listOf("pendulum", "crossover", "external_rotation", "wall_climb", "hitchhiker"), 6)
     }
 
     fun isExerciseAllowed(input: SessionInput): Boolean {

@@ -1,9 +1,21 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.Kinetiq" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="colorPrimary">@color/teal_primary</item>
+        <item name="colorSecondary">@color/teal_dark</item>
+        <item name="android:windowBackground">@color/creamy_white</item>
+        <item name="android:statusBarColor">@color/creamy_white</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 
     <style name="Theme.Kinetiq" parent="Base.Theme.Kinetiq" />
+
+    <style name="Widget.Kinetiq.Button" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@null</item>
+        <item name="android:background">@drawable/bg_primary_button</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:textStyle">bold</item>
+    </style>
 </resources>

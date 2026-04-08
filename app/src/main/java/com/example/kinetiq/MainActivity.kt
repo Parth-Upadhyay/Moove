@@ -22,6 +22,7 @@ import com.example.kinetiq.exercises.Severity
 import com.example.kinetiq.models.*
 import com.google.android.material.textfield.TextInputEditText
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.pose.PoseDetection
@@ -40,9 +41,12 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     private lateinit var skeletonOverlay: SkeletonOverlayView
     private lateinit var exerciseNameText: TextView
     private lateinit var repCounterText: TextView
+    private lateinit var setCounterText: TextView
+    private lateinit var timerDisplayText: TextView
     private lateinit var feedbackText: TextView
     private lateinit var romDisplay: TextView
     private lateinit var btnEndSession: Button
+    private lateinit var btnBack: ImageButton
     
     // Pre-Session Views
     private lateinit var instructionLayout: ConstraintLayout
@@ -52,10 +56,10 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     private lateinit var btnProceed: Button
     
     // Post-Session Report Views
-    private lateinit var reportLayout: ConstraintLayout
+    private lateinit var reportLayout: View // Changed from ConstraintLayout to View to support ScrollView
     private lateinit var reportReps: TextView
     private lateinit var reportTime: TextView
-    private lateinit var reportPeakRom: TextView
+    private lateinit var reportPeakMotion: TextView
     private lateinit var postPainSeekBar: SeekBar
     private lateinit var postPainValue: TextView
     private lateinit var reportNoteInput: TextInputEditText
@@ -70,7 +74,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     private var isSessionStarted = false
     
     private var sessionStartTime: Long = 0
-    private var peakRomAcrossSession: Double = 0.0
+    private var peakMotionAcrossSession: Double = 0.0
     private var totalRepsAcrossSession: Int = 0
     private var initialPainScore: Int = 0
 
@@ -123,10 +127,13 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         viewFinder = findViewById(R.id.viewFinder)
         skeletonOverlay = findViewById(R.id.skeletonOverlay)
         exerciseNameText = findViewById(R.id.exerciseName)
+        setCounterText = findViewById(R.id.setCounter)
         repCounterText = findViewById(R.id.repCounter)
+        timerDisplayText = findViewById(R.id.timerDisplay)
         feedbackText = findViewById(R.id.feedbackText)
         romDisplay = findViewById(R.id.romDisplay)
         btnEndSession = findViewById(R.id.btnEndSession)
+        btnBack = findViewById(R.id.btnBack)
         
         instructionLayout = findViewById(R.id.instructionLayout)
         videoInstruction = findViewById(R.id.videoInstruction)
@@ -137,14 +144,20 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         reportLayout = findViewById(R.id.reportLayout)
         reportReps = findViewById(R.id.reportReps)
         reportTime = findViewById(R.id.reportTime)
-        reportPeakRom = findViewById(R.id.reportPeakRom)
+        reportPeakMotion = findViewById(R.id.reportPeakRom) 
         postPainSeekBar = findViewById(R.id.postPainSeekBar)
         postPainValue = findViewById(R.id.postPainValue)
         reportNoteInput = findViewById(R.id.reportNoteInput)
         btnSaveReport = findViewById(R.id.btnSaveReport)
+
+        romDisplay.visibility = View.VISIBLE
     }
 
     private fun setupListeners() {
+        btnBack.setOnClickListener {
+            onBackPressedDispatcher.onBackPressed()
+        }
+
         prePainSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 prePainValue.text = progress.toString()
@@ -181,6 +194,9 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
             "external_rotation", "external" -> "external"
             "crossover" -> "crossover"
             "wall_climb", "wallclimb" -> "wallclimb"
+            "lateral_arm_raise" -> "lateral"
+            "forward_arm_raise" -> "forward"
+            "hitchhiker" -> "hitchhiker"
             else -> "pendulum"
         }
 
@@ -244,7 +260,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
             exercise = selectedExercise,
             side = selectedSide,
             protocol_stage = 1,
-            prescription = Prescription(selectedExercise, 3, 12, 10, selectedSide, null, null, null, 60, false, ""),
+            prescription = Prescription(selectedExercise, 3, 12, 10, selectedSide, null, null, null, 20, false, ""),
             pre_session = PreSession(initialPainScore, 0, 8, "normal", 0, false, false, ""),
             context = SessionContext(0.8f, true, 72, 50, emptyList()),
             results = PerformanceResults(
@@ -254,12 +270,12 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
                 compensated_reps = 0,
                 invalid_reps = 0,
                 invalid_rep_reasons = emptyList(),
-                peak_rom_degrees = peakRomAcrossSession,
+                peak_rom_degrees = peakMotionAcrossSession, 
                 mean_rep_duration_ms = 2000,
                 session_duration_ms = System.currentTimeMillis() - sessionStartTime,
                 calories_burned = 10
             ),
-            rom_trend = RomTrend(peakRomAcrossSession, peakRomAcrossSession, 0.0, 0, 0),
+            rom_trend = RomTrend(peakMotionAcrossSession, peakMotionAcrossSession, 0.0, 0, 0),
             pain_log = emptyList(),
             form_flags = emptyList(),
             doctor_alerts = emptyList(),
@@ -269,7 +285,16 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
             benchmarking = null
         )
 
-        db.collection("sessions").add(sessionResult)
+        val batch = db.batch()
+        val sessionRef = db.collection("sessions").document()
+        batch.set(sessionRef, sessionResult)
+        
+        val userRef = db.collection("users").document(uid)
+        batch.update(userRef, "totalSessions", FieldValue.increment(1))
+        // Simplified streak logic: increment it for now. In real app, check dates.
+        batch.update(userRef, "streak", FieldValue.increment(1))
+
+        batch.commit()
             .addOnSuccessListener {
                 Toast.makeText(this, "Session Logged Successfully!", Toast.LENGTH_LONG).show()
                 finish()
@@ -369,7 +394,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
             keypoints = keypoints,
             pre_session = PreSession(initialPainScore, 0, 8, "normal", 0, false, false, ""),
             patient_context = PatientContext("recovery", "", 4, side, 42, emptyList(), "en", false, 74, 48, 4000),
-            prescription = Prescription(exercise, 3, 12, 10, side, null, null, null, 60, false, ""),
+            prescription = Prescription(exercise, 3, 10, 10, side, null, null, null, 20, false, ""),
             session_history_summary = SessionHistorySummary(3, 5, 80f, 0, 0, 0.8f)
         )
     }
@@ -407,28 +432,42 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         }
     }
 
-    override fun onRepCountUpdated(count: Int) {
+    override fun onRepCountUpdated(count: Int, target: Int) {
         runOnUiThread {
-            repCounterText.text = "Reps: $count"
-            totalRepsAcrossSession = count
+            repCounterText.text = "$count / $target"
+            totalRepsAcrossSession += 1 // This is a bit simplified, but tracked for report
+        }
+    }
+    
+    override fun onSetCountUpdated(currentSet: Int, totalSets: Int) {
+        runOnUiThread {
+            setCounterText.text = "$currentSet / $totalSets"
+        }
+    }
+    
+    override fun onTimerUpdated(secondsRemaining: Int?) {
+        runOnUiThread {
+            if (secondsRemaining != null) {
+                timerDisplayText.visibility = View.VISIBLE
+                timerDisplayText.text = "REST: ${secondsRemaining}s"
+            } else {
+                timerDisplayText.visibility = View.GONE
+            }
         }
     }
 
-    override fun onRomUpdated(rom: Double) {
+    override fun onPeakMotionUpdated(peakMotion: Double) {
         runOnUiThread {
-            if (selectedExercise.equals("crossover", ignoreCase = true)) {
-                romDisplay.text = "Optimality: ${rom.toInt()}%"
-            } else {
-                romDisplay.text = "ROM: ${rom.toInt()}°"
+            if (peakMotion > peakMotionAcrossSession) {
+                peakMotionAcrossSession = peakMotion
             }
-            if (rom > peakRomAcrossSession) {
-                peakRomAcrossSession = rom
-            }
+            romDisplay.text = "${peakMotion.toInt()}°"
         }
     }
 
     override fun onSessionEnded(reason: String, priority: String) {
         runOnUiThread {
+            feedbackText.text = reason
             endExerciseSession()
         }
     }
@@ -436,9 +475,9 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     private fun showReport() {
         val durationSeconds = (System.currentTimeMillis() - sessionStartTime) / 1000
         
-        reportReps.text = "Reps Completed: $totalRepsAcrossSession"
-        reportTime.text = "Time Taken: ${durationSeconds}s"
-        reportPeakRom.text = if (selectedExercise.equals("crossover", ignoreCase = true)) "Peak Optimality: ${peakRomAcrossSession.toInt()}%" else "Peak ROM: ${peakRomAcrossSession.toInt()}°"
+        reportReps.text = totalRepsAcrossSession.toString()
+        reportTime.text = "${durationSeconds}s"
+        reportPeakMotion.text = "${peakMotionAcrossSession.toInt()}°"
         
         reportLayout.visibility = View.VISIBLE
     }

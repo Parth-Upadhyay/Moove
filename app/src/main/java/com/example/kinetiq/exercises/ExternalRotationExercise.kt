@@ -7,11 +7,9 @@ import kotlin.math.*
 class ExternalRotationExercise : Exercise {
     private var repCount = 0
     private var state = State.START
-    
-    // EMA Smoothing
-    private val alpha = 0.3
-    private var smoothedRotation = 0.0
-    private var smoothedElbowDrift = 0.0
+    private var holdStartMs: Long = 0
+    private var maxAngle = 0.0
+    private var currentHoldMet = false
 
     private enum class State { START, ROTATING, PEAK, RETURNING }
 
@@ -20,60 +18,69 @@ class ExternalRotationExercise : Exercise {
         val shoulder = input.keypoints["${side}_shoulder"]
         val elbow = input.keypoints["${side}_elbow"]
         val wrist = input.keypoints["${side}_wrist"]
-        val hip = input.keypoints["${side}_hip"]
 
-        if (shoulder == null || elbow == null || wrist == null || hip == null) {
+        if (shoulder == null || elbow == null || wrist == null) {
             return ExerciseResult(repCount, "invalid", reason = "Keypoints missing")
         }
 
-        // 1. Calculate Angles & Metrics
-        val rawRotation = calculateExternalRotation(elbow, wrist)
-        val rawElbowDrift = abs(elbow.x - hip.x) 
+        // Angle at elbow between upper arm (elbow-to-shoulder) and forearm (elbow-to-wrist)
+        // Ideal = 90° outward. 
+        val currentAngle = PoseMath.calculateAngle(shoulder, elbow, wrist)
         
-        // 2. EMA Smoothing
-        smoothedRotation = alpha * rawRotation + (1 - alpha) * smoothedRotation
-        smoothedElbowDrift = alpha * rawElbowDrift + (1 - alpha) * smoothedElbowDrift
-
-        val incorrectJoints = mutableListOf<String>()
-        var reason: String? = null
-
-        // 3. Strict Validation
-        if (smoothedElbowDrift > 0.08f) {
-            incorrectJoints.add("elbow")
-            reason = "Elbow drifting away from torso"
+        if (currentAngle > maxAngle) {
+            maxAngle = currentAngle
         }
 
-        // 4. State Machine
+        val targetHold = 3000L // 3 seconds
+        var currentHoldDuration = 0L
+
         when (state) {
             State.START -> {
-                if (smoothedRotation < 10.0) state = State.ROTATING
+                if (currentAngle > 45.0) state = State.ROTATING
             }
             State.ROTATING -> {
-                if (smoothedRotation >= 30.0) state = State.PEAK
+                if (currentAngle > 70.0) { // arbitrary peak threshold for hold start
+                    state = State.PEAK
+                    holdStartMs = input.timestamp_ms
+                }
             }
             State.PEAK -> {
-                state = State.RETURNING
+                currentHoldDuration = input.timestamp_ms - holdStartMs
+                if (currentHoldDuration >= targetHold) {
+                    currentHoldMet = true
+                    state = State.RETURNING
+                }
+                if (currentAngle < 60.0) {
+                    state = State.START
+                    currentHoldMet = false
+                }
             }
             State.RETURNING -> {
-                if (smoothedRotation < 10.0) {
+                if (currentAngle < 45.0) {
                     repCount++
                     state = State.START
+                    currentHoldMet = false
                 }
             }
         }
 
+        // Mark elbow red if outward angle stays below 30°
+        val incorrectJoints = mutableListOf<String>()
+        if (currentAngle > 10.0 && maxAngle < 30.0) {
+            incorrectJoints.add("${side}_elbow")
+        }
+
+        // Peak Motion = max angle achieved
+        val peakMotionValue = maxAngle
+
         return ExerciseResult(
             repCount = repCount,
-            status = if (incorrectJoints.isEmpty()) "valid" else "invalid",
+            status = if (incorrectJoints.isNotEmpty()) "invalid" else "valid",
+            severity = if (incorrectJoints.isNotEmpty()) Severity.WARNING else Severity.NONE,
+            currentRom = maxAngle,
+            peakMotion = peakMotionValue,
             incorrect_joints = incorrectJoints,
-            reason = reason,
-            currentRom = smoothedRotation
+            holdCountdown = if (state == State.PEAK) (3 - (currentHoldDuration / 1000).toInt()) else null
         )
-    }
-
-    private fun calculateExternalRotation(elbow: com.example.kinetiq.models.Keypoint, wrist: com.example.kinetiq.models.Keypoint): Double {
-        val dx = (wrist.x - elbow.x).toDouble()
-        val dz = (wrist.z - elbow.z).toDouble()
-        return abs(Math.toDegrees(atan2(dz, dx)))
     }
 }

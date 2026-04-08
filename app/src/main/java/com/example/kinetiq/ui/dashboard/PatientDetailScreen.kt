@@ -3,15 +3,21 @@ package com.example.kinetiq.ui.dashboard
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -24,6 +30,7 @@ import com.example.kinetiq.models.ClinicalPrescription
 import com.example.kinetiq.models.Patient
 import com.example.kinetiq.models.PrescribedExercise
 import com.example.kinetiq.models.SessionResult
+import com.example.kinetiq.ui.theme.*
 import com.example.kinetiq.viewmodel.AnalyticsViewModel
 import com.example.kinetiq.viewmodel.DoctorDashboardViewModel
 import com.example.kinetiq.viewmodel.ExerciseTrendPoint
@@ -39,7 +46,7 @@ fun PatientDetailScreen(
     val state by viewModel.uiState.collectAsState()
     val patient = state.patients.find { it.id == patientId }
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Overview", "Notes", "Analysis", "Prescription")
+    val tabs = listOf("Overview", "Profile", "Analysis", "Rx")
     val context = LocalContext.current
 
     LaunchedEffect(patientId) {
@@ -55,31 +62,57 @@ fun PatientDetailScreen(
     }
 
     Scaffold(
+        containerColor = MooveBackground,
         topBar = {
-            TopAppBar(
-                title = { Text(patient?.displayName ?: "Patient Detail") },
+            CenterAlignedTopAppBar(
+                title = { Text(patient?.displayName ?: "Patient Detail", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MooveOnBackground)
                     }
-                }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MooveBackground,
+                    titleContentColor = MooveOnBackground
+                )
             )
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
-            TabRow(selectedTabIndex = selectedTab) {
+            ScrollableTabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = MooveBackground,
+                contentColor = MoovePrimary,
+                edgePadding = 24.dp,
+                divider = {},
+                indicator = { tabPositions ->
+                    if (selectedTab < tabPositions.size) {
+                        TabRowDefaults.SecondaryIndicator(
+                            Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                            color = MoovePrimary
+                        )
+                    }
+                }
+            ) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        text = { Text(title) }
+                        text = { 
+                            Text(
+                                title, 
+                                style = MaterialTheme.typography.labelLarge,
+                                color = if (selectedTab == index) MoovePrimary else MooveOnSurfaceVariant,
+                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Medium
+                            ) 
+                        }
                     )
                 }
             }
 
             if (patient == null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(color = MoovePrimary)
                 }
             } else {
                 when (selectedTab) {
@@ -100,74 +133,105 @@ fun OverviewTab(patient: Patient, sessions: List<SessionResult>, analyticsViewMo
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 24.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Recovery Progress", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(24.dp))
+        Text("Recovery Status", style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(16.dp))
         
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        ) {
-            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Overall Recovery Score", style = MaterialTheme.typography.labelLarge)
+        MooveCard(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Overall Recovery Score", style = MaterialTheme.typography.labelLarge, color = MooveOnSurfaceVariant)
                 Text(
                     "${analyticsState.overallSummary.weightedRecoveryPercentage.toInt()}%",
                     style = MaterialTheme.typography.displayMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MoovePrimary,
+                    fontWeight = FontWeight.Bold
                 )
+                Spacer(Modifier.height(12.dp))
+                MooveProgressBar(progress = analyticsState.overallSummary.weightedRecoveryPercentage.toFloat() / 100f)
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-        Text("Adherence", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(24.dp))
         
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AdherenceCard("Recent Adherence", "${(analyticsState.overallSummary.adherenceRate * 100).toInt()}%", Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            AdherenceCard("Adherence", "${(analyticsState.overallSummary.adherenceRate * 100).toInt()}%", Modifier.weight(1f))
             AdherenceCard("Total Sessions", "${analyticsState.overallSummary.totalSessions}", Modifier.weight(1f))
         }
 
-        Spacer(Modifier.height(24.dp))
-        Text("Post-Session Reports", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(32.dp))
+        Text("Recent Sessions", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
         
         sessions.take(10).forEach { session ->
-            SessionReportItem(session)
+            SessionReportItem(session, sessions)
+            Spacer(Modifier.height(12.dp))
         }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
 fun AdherenceCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier = modifier) {
-        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, style = MaterialTheme.typography.labelSmall)
-            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    MooveCard(modifier = modifier) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MooveOnBackground)
         }
     }
 }
 
 @Composable
-fun SessionReportItem(session: SessionResult) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
-    ) {
-        Column(Modifier.padding(12.dp)) {
+fun SessionReportItem(session: SessionResult, allSessions: List<SessionResult>) {
+    val improvement = calculateImprovement(session, allSessions)
+
+    MooveCard(modifier = Modifier.fillMaxWidth()) {
+        Column {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(session.exercise, fontWeight = FontWeight.Bold)
-                Text(session.timestamp_end.take(10), style = MaterialTheme.typography.bodySmall)
+                Text(session.exercise.replace("_", " ").uppercase(), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MooveOnBackground)
+                Text(session.timestamp_end.take(10), style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
             }
-            Text("Peak ROM: ${session.results.peak_rom_degrees}°", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Peak ROM: ${session.results.peak_rom_degrees.toInt()}°", style = MaterialTheme.typography.bodyMedium, color = MooveOnBackground)
+                if (improvement != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Surface(
+                        color = (if (improvement >= 0) Color(0xFF4CAF50) else Color(0xFFE57373)).copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "${if (improvement >= 0) "+" else ""}${improvement.toInt()}%",
+                            color = if (improvement >= 0) Color(0xFF4CAF50) else Color(0xFFE57373),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
             if (session.journal_entry?.text?.isNotEmpty() == true) {
-                Text("Patient Note: ${session.journal_entry.text}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                Spacer(Modifier.height(8.dp))
+                Text("Note: ${session.journal_entry.text}", style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
             }
         }
     }
+}
+
+fun calculateImprovement(current: SessionResult, allSessions: List<SessionResult>): Double? {
+    val exerciseSessions = allSessions.filter { it.exercise == current.exercise }
+        .sortedBy { it.timestamp_end }
+    val currentIndex = exerciseSessions.indexOfFirst { it.session_id == current.session_id }
+    if (currentIndex <= 0) return null
+    
+    val previous = exerciseSessions[currentIndex - 1]
+    val prevAbility = previous.results.peak_rom_degrees
+    if (prevAbility == 0.0) return null
+    
+    return ((current.results.peak_rom_degrees - prevAbility) / prevAbility) * 100.0
 }
 
 @Composable
@@ -180,92 +244,100 @@ fun NotesTab(patient: Patient, viewModel: DoctorDashboardViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 24.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Clinical Profile", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(24.dp))
+        Text("Clinical Profile", style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(24.dp))
 
-        OutlinedTextField(
+        MooveTextField(
             value = injuryType,
             onValueChange = { injuryType = it },
-            label = { Text("Injury Label") },
-            modifier = Modifier.fillMaxWidth()
+            label = "Injury Label"
         )
 
-        Row(Modifier.fillMaxWidth()) {
-            OutlinedTextField(
+        Spacer(Modifier.height(16.dp))
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            MooveTextField(
                 value = age,
                 onValueChange = { if (it.all { c -> c.isDigit() }) age = it },
-                label = { Text("Age") },
-                modifier = Modifier.weight(1f).padding(end = 8.dp)
+                label = "Age",
+                modifier = Modifier.weight(1f)
             )
-            OutlinedTextField(
+            MooveTextField(
                 value = sex,
                 onValueChange = { sex = it },
-                label = { Text("Sex") },
+                label = "Sex",
                 modifier = Modifier.weight(1f)
             )
         }
 
-        OutlinedTextField(
+        Spacer(Modifier.height(16.dp))
+
+        MooveTextField(
             value = medicalNotes,
             onValueChange = { medicalNotes = it },
-            label = { Text("Medical History & Notes") },
-            modifier = Modifier.fillMaxWidth().height(200.dp),
-            maxLines = 10
+            label = "Medical History & Notes",
+            singleLine = false,
+            modifier = Modifier.height(200.dp)
         )
 
-        Spacer(Modifier.height(24.dp))
-        Button(
+        Spacer(Modifier.height(32.dp))
+        MoovePrimaryButton(
             onClick = {
                 viewModel.updatePatientNotes(patient.id, age.toIntOrNull() ?: 0, sex, medicalNotes, injuryType)
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Save Profile & Notes")
+            Text("Save Profile & Notes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
 fun AnalysisTab(patient: Patient, sessions: List<SessionResult>, analyticsViewModel: AnalyticsViewModel) {
     val analyticsState by analyticsViewModel.uiState.collectAsState()
-    val exercises = sessions.map { it.exercise }.distinct()
+    
+    val allExercises = listOf(
+        "pendulum", "wall_climb", "external_rotation", "crossover",
+        "lateral_arm_raise", "forward_arm_raise", "hitchhiker"
+    )
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 24.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Improvement Analysis", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(24.dp))
+        Text("Improvement Analysis", style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-        ) {
-            Row(Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+        MooveCard(modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("OVR Score", style = MaterialTheme.typography.labelMedium)
-                    Text("${analyticsState.overallSummary.weightedRecoveryPercentage.toInt()}%", style = MaterialTheme.typography.titleLarge)
+                    Text("OVR Score", style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
+                    Text("${analyticsState.overallSummary.weightedRecoveryPercentage.toInt()}%", style = MaterialTheme.typography.titleLarge, color = MoovePrimary, fontWeight = FontWeight.Bold)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Total Sessions", style = MaterialTheme.typography.labelMedium)
-                    Text("${analyticsState.overallSummary.totalSessions}", style = MaterialTheme.typography.titleLarge)
+                    Text("Sessions", style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
+                    Text("${analyticsState.overallSummary.totalSessions}", style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        Spacer(Modifier.height(24.dp))
-        Text("Exercise Specific Trends", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(32.dp))
+        Text("Exercise Specific Trends", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
 
-        exercises.forEach { exercise ->
+        allExercises.forEach { exercise ->
             ExerciseAnalysisSection(exercise, patient.id, analyticsViewModel)
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
         }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -273,12 +345,16 @@ fun AnalysisTab(patient: Patient, sessions: List<SessionResult>, analyticsViewMo
 fun ExerciseAnalysisSection(exercise: String, patientId: String, viewModel: AnalyticsViewModel) {
     var expanded by remember { mutableStateOf(false) }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
+    MooveCard(modifier = Modifier.fillMaxWidth()) {
+        Column {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(exercise.replace("_", " ").uppercase(), fontWeight = FontWeight.Bold)
+                Text(exercise.replace("_", " ").uppercase(), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MooveOnBackground)
                 IconButton(onClick = { expanded = !expanded }) {
-                    Text(if (expanded) "▲" else "▼")
+                    Icon(
+                        if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = MoovePrimary
+                    )
                 }
             }
             
@@ -295,17 +371,23 @@ fun ExerciseAnalysisSection(exercise: String, patientId: String, viewModel: Anal
                 }
 
                 if (isDataLoading) {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally), color = MoovePrimary)
                 } else if (exerciseData.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(16.dp))
                     PatientProgressChart(
                         data = exerciseData,
                         modifier = Modifier.fillMaxWidth().height(180.dp)
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Text(comparison, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(16.dp))
+                    Surface(
+                        color = MooveBackground.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().border(1.dp, CardBorder, RoundedCornerShape(12.dp))
+                    ) {
+                        Text(comparison, style = MaterialTheme.typography.bodySmall, color = MooveOnBackground, fontWeight = FontWeight.Medium, modifier = Modifier.padding(12.dp))
+                    }
                 } else {
-                    Text("No trend data available", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                    Text("No trend data available", style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
                 }
             }
         }
@@ -314,40 +396,45 @@ fun ExerciseAnalysisSection(exercise: String, patientId: String, viewModel: Anal
 
 @Composable
 fun PatientProgressChart(data: List<ExerciseTrendPoint>, modifier: Modifier = Modifier) {
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val painColor = Color.Red
+    val primaryColor = MoovePrimary
+    val painColor = Color(0xFFE57373)
     
     Column(modifier) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            ChartLegendItem("ROM (°)", primaryColor)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            ChartLegendItem("Peak ROM (°)", primaryColor)
+            Spacer(Modifier.width(16.dp))
             ChartLegendItem("Pain", painColor)
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(16.dp))
         
         Canvas(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (data.isEmpty()) return@Canvas
             val width = size.width
             val height = size.height
             
-            val maxMetric = data.maxOf { it.optimality }.coerceAtLeast(180.0).toFloat()
+            val maxMetric = 180f
             
-            val metricPath = Path()
-            data.forEachIndexed { index, point ->
-                val x = if (data.size > 1) (index.toFloat() / (data.size - 1)) * width else width / 2
-                val y = height - (point.optimality.toFloat() / maxMetric) * height
-                if (index == 0) metricPath.moveTo(x, y) else metricPath.lineTo(x, y)
-                drawCircle(primaryColor, radius = 3.dp.toPx(), center = Offset(x, y))
-            }
-            drawPath(metricPath, primaryColor, style = Stroke(width = 2.dp.toPx()))
+            if (data.size > 1) {
+                val metricPath = Path()
+                data.forEachIndexed { index, point ->
+                    val x = (index.toFloat() / (data.size - 1)) * width
+                    val y = height - (point.optimality.toFloat().coerceIn(0f, 180f) / maxMetric) * height
+                    if (index == 0) metricPath.moveTo(x, y) else metricPath.lineTo(x, y)
+                    drawCircle(MooveBackground, radius = 4.dp.toPx(), center = Offset(x, y))
+                    drawCircle(primaryColor, radius = 2.dp.toPx(), center = Offset(x, y))
+                }
+                drawPath(metricPath, primaryColor, style = Stroke(width = 2.dp.toPx()))
 
-            val painPath = Path()
-            data.forEachIndexed { index, point ->
-                val x = if (data.size > 1) (index.toFloat() / (data.size - 1)) * width else width / 2
-                val y = height - (point.pain.toFloat() / 10f) * height
-                if (index == 0) painPath.moveTo(x, y) else painPath.lineTo(x, y)
-                drawCircle(painColor, radius = 3.dp.toPx(), center = Offset(x, y))
+                val painPath = Path()
+                data.forEachIndexed { index, point ->
+                    val x = (index.toFloat() / (data.size - 1)) * width
+                    val y = height - (point.pain.toFloat().coerceIn(0f, 10f) / 10f) * height
+                    if (index == 0) painPath.moveTo(x, y) else painPath.lineTo(x, y)
+                    drawCircle(MooveBackground, radius = 4.dp.toPx(), center = Offset(x, y))
+                    drawCircle(painColor, radius = 2.dp.toPx(), center = Offset(x, y))
+                }
+                drawPath(painPath, painColor, style = Stroke(width = 2.dp.toPx()))
             }
-            drawPath(painPath, painColor, style = Stroke(width = 2.dp.toPx()))
         }
     }
 }
@@ -355,9 +442,9 @@ fun PatientProgressChart(data: List<ExerciseTrendPoint>, modifier: Modifier = Mo
 @Composable
 fun ChartLegendItem(text: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).background(color))
-        Spacer(Modifier.width(4.dp))
-        Text(text, style = MaterialTheme.typography.labelSmall)
+        Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(color))
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
     }
 }
 
@@ -367,7 +454,10 @@ fun PrescriptionTab(patient: Patient, viewModel: DoctorDashboardViewModel) {
         "pendulum" to "Pendulum",
         "wall_climb" to "Wall Climb",
         "external_rotation" to "External Rotation",
-        "crossover" to "Crossover"
+        "crossover" to "Crossover",
+        "lateral_arm_raise" to "Lateral Arm Raise",
+        "forward_arm_raise" to "Forward Arm Raise",
+        "hitchhiker" to "Hitchhiker"
     )
 
     var prescribedList by remember {
@@ -390,70 +480,78 @@ fun PrescriptionTab(patient: Patient, viewModel: DoctorDashboardViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 24.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Exercise Prescription", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(24.dp))
+        Text("Exercise Prescription", style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
 
         prescribedList.forEachIndexed { index, exercise ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(
-                    checked = exercise.isActive,
-                    onCheckedChange = { checked ->
-                        prescribedList = prescribedList.toMutableList().apply {
-                            this[index] = exercise.copy(isActive = checked)
+            MooveCard(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = exercise.isActive,
+                            onCheckedChange = { checked ->
+                                prescribedList = prescribedList.toMutableList().apply {
+                                    this[index] = exercise.copy(isActive = checked)
+                                }
+                            },
+                            colors = CheckboxDefaults.colors(checkedColor = MoovePrimary)
+                        )
+                        Text(exercise.exerciseName, style = MaterialTheme.typography.bodyLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                    }
+
+                    if (exercise.isActive) {
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            MooveTextField(
+                                value = if (exercise.sets == 0) "" else exercise.sets.toString(),
+                                onValueChange = {
+                                    val newValue = it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
+                                    prescribedList = prescribedList.toMutableList().apply {
+                                        this[index] = exercise.copy(sets = newValue)
+                                    }
+                                },
+                                label = "Sets",
+                                modifier = Modifier.weight(1f)
+                            )
+                            MooveTextField(
+                                value = if (exercise.reps == 0) "" else exercise.reps.toString(),
+                                onValueChange = {
+                                    val newValue = it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
+                                    prescribedList = prescribedList.toMutableList().apply {
+                                        this[index] = exercise.copy(reps = newValue)
+                                    }
+                                },
+                                label = "Reps",
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
-                )
-                Text(exercise.exerciseName, modifier = Modifier.weight(1f))
-            }
-
-            if (exercise.isActive) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 48.dp, bottom = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = if (exercise.sets == 0) "" else exercise.sets.toString(),
-                        onValueChange = {
-                            val newValue = it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
-                            prescribedList = prescribedList.toMutableList().apply {
-                                this[index] = exercise.copy(sets = newValue)
-                            }
-                        },
-                        label = { Text("Sets") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = if (exercise.reps == 0) "" else exercise.reps.toString(),
-                        onValueChange = {
-                            val newValue = it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
-                            prescribedList = prescribedList.toMutableList().apply {
-                                this[index] = exercise.copy(reps = newValue)
-                            }
-                        },
-                        label = { Text("Reps") },
-                        modifier = Modifier.weight(1f)
-                    )
                 }
             }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Spacer(Modifier.height(12.dp))
         }
 
-        OutlinedTextField(
+        Spacer(Modifier.height(16.dp))
+        MooveTextField(
             value = instructions,
             onValueChange = { instructions = it },
-            label = { Text("General Instructions") },
-            modifier = Modifier.fillMaxWidth().height(100.dp),
-            maxLines = 4
+            label = "General Instructions",
+            singleLine = false,
+            modifier = Modifier.height(120.dp)
         )
 
-        Spacer(Modifier.height(24.dp))
-        Button(
+        Spacer(Modifier.height(32.dp))
+        MoovePrimaryButton(
             onClick = {
                 viewModel.updatePrescription(
                     patient.id,
@@ -465,7 +563,8 @@ fun PrescriptionTab(patient: Patient, viewModel: DoctorDashboardViewModel) {
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Update Prescription")
+            Text("Update Prescription", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
+        Spacer(Modifier.height(32.dp))
     }
 }

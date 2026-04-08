@@ -15,7 +15,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.example.kinetiq.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -25,7 +25,6 @@ fun HorizontalCalendar(
     onDateSelected: (Date) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val calendar = Calendar.getInstance()
     // Generate dates for the current week or a range
     val dates = remember {
         val list = mutableListOf<Date>()
@@ -54,13 +53,14 @@ fun HorizontalCalendar(
         Text(
             text = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(selectedDate),
             style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
         )
         
         LazyRow(
             state = listState,
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            contentPadding = PaddingValues(horizontal = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -88,26 +88,27 @@ private fun DateItem(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .width(50.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .width(56.dp)
+            .clip(RoundedCornerShape(16.dp))
             .background(
-                if (isSelected) MaterialTheme.colorScheme.primary 
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                if (isSelected) TealPrimary 
+                else SectionBackground
             )
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp)
+            .padding(vertical = 16.dp)
     ) {
         Text(
             text = dayOfWeek,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 10.sp
+            style = MaterialTheme.typography.labelSmall,
+            color = if (isSelected) SurfaceWhite else TextSecondary,
+            fontWeight = FontWeight.Medium
         )
+        Spacer(Modifier.height(4.dp))
         Text(
             text = dayOfMonth,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+            color = if (isSelected) SurfaceWhite else TextPrimary
         )
     }
 }

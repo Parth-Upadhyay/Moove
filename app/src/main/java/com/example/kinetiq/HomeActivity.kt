@@ -6,6 +6,9 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,23 +21,26 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.kinetiq.models.*
 import com.example.kinetiq.ui.auth.AuthScreen
 import com.example.kinetiq.ui.components.GridCalendar
 import com.example.kinetiq.ui.dashboard.*
+import com.example.kinetiq.ui.theme.*
 import com.example.kinetiq.viewmodel.*
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -51,22 +57,28 @@ class HomeActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         
         setContent {
-            KinetiqTheme {
+            MooveTheme {
                 val authViewModel: AuthViewModel = hiltViewModel()
                 val authState by authViewModel.uiState.collectAsState()
                 
                 var currentUserRole by remember { mutableStateOf<UserRole?>(null) }
                 var isLoading by remember { mutableStateOf(true) }
+                
+                // Navigation States
                 var selectedPatientId by remember { mutableStateOf<String?>(null) }
                 var showRomAnalytics by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var activeChatPartner by remember { mutableStateOf<Pair<String, String>?>(null) }
+                var showAchievements by remember { mutableStateOf(false) }
+                var showSettings by remember { mutableStateOf(false) }
 
-                // Global Back Navigation Handling
-                BackHandler(enabled = activeChatPartner != null || showRomAnalytics != null || selectedPatientId != null) {
+                // Improved Back Button Handling
+                BackHandler(enabled = activeChatPartner != null || showRomAnalytics != null || selectedPatientId != null || showAchievements || showSettings) {
                     when {
                         activeChatPartner != null -> activeChatPartner = null
                         showRomAnalytics != null -> showRomAnalytics = null
                         selectedPatientId != null -> selectedPatientId = null
+                        showAchievements -> showAchievements = false
+                        showSettings -> showSettings = false
                     }
                 }
 
@@ -99,8 +111,8 @@ class HomeActivity : AppCompatActivity() {
                 }
 
                 if (isLoading) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                    Box(Modifier.fillMaxSize().background(MooveBackground), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MoovePrimary)
                     }
                 } else if (currentUserRole == null) {
                     AuthScreen(
@@ -140,41 +152,62 @@ class HomeActivity : AppCompatActivity() {
                                         },
                                         onPatientClick = { patientId ->
                                             selectedPatientId = patientId
+                                        },
+                                        onChatWithPatient = { patientId, name ->
+                                            activeChatPartner = patientId to name
                                         }
                                     )
                                 }
                             }
                         }
                         UserRole.PATIENT -> {
-                            if (activeChatPartner != null) {
-                                ChatScreen(
-                                    otherUserId = activeChatPartner!!.first,
-                                    otherUserName = activeChatPartner!!.second,
-                                    onBack = { activeChatPartner = null }
-                                )
-                            } else if (showRomAnalytics != null) {
-                                RomDashboardScreen(
-                                    patientId = showRomAnalytics!!.first,
-                                    exerciseType = showRomAnalytics!!.second,
-                                    onBack = { showRomAnalytics = null }
-                                )
-                            } else {
-                                PatientDashboard(
-                                    onLogout = {
-                                        FirebaseAuth.getInstance().signOut()
-                                        authViewModel.resetState()
-                                        currentUserRole = null
-                                    },
-                                    onChatWithDoctor = { doctorId, name ->
-                                        activeChatPartner = doctorId to name
-                                    },
-                                    onViewProgress = { exerciseType ->
-                                        val uid = FirebaseAuth.getInstance().currentUser?.uid
-                                        if (uid != null) {
-                                            showRomAnalytics = uid to exerciseType
-                                        }
-                                    }
-                                )
+                            when {
+                                showAchievements -> {
+                                    AchievementsScreen(
+                                        viewModel = hiltViewModel<AchievementsViewModel>(),
+                                        onBack = { showAchievements = false }
+                                    )
+                                }
+                                showSettings -> {
+                                    SettingsScreen(
+                                        viewModel = hiltViewModel<SettingsViewModel>(),
+                                        onBack = { showSettings = false }
+                                    )
+                                }
+                                activeChatPartner != null -> {
+                                    ChatScreen(
+                                        otherUserId = activeChatPartner!!.first,
+                                        otherUserName = activeChatPartner!!.second,
+                                        onBack = { activeChatPartner = null }
+                                    )
+                                }
+                                showRomAnalytics != null -> {
+                                    RomDashboardScreen(
+                                        patientId = showRomAnalytics!!.first,
+                                        exerciseType = showRomAnalytics!!.second,
+                                        onBack = { showRomAnalytics = null }
+                                    )
+                                }
+                                else -> {
+                                    PatientDashboard(
+                                        onLogout = {
+                                            FirebaseAuth.getInstance().signOut()
+                                            authViewModel.resetState()
+                                            currentUserRole = null
+                                        },
+                                        onChatWithDoctor = { doctorId, name ->
+                                            activeChatPartner = doctorId to name
+                                        },
+                                        onViewProgress = { exerciseType ->
+                                            val uid = FirebaseAuth.getInstance().currentUser?.uid
+                                            if (uid != null) {
+                                                showRomAnalytics = uid to exerciseType
+                                            }
+                                        },
+                                        onShowAchievements = { showAchievements = true },
+                                        onShowSettings = { showSettings = true }
+                                    )
+                                }
                             }
                         }
                     }
@@ -188,7 +221,9 @@ class HomeActivity : AppCompatActivity() {
     fun PatientDashboard(
         onLogout: () -> Unit, 
         onChatWithDoctor: (String, String) -> Unit,
-        onViewProgress: (String) -> Unit
+        onViewProgress: (String) -> Unit,
+        onShowAchievements: () -> Unit,
+        onShowSettings: () -> Unit
     ) {
         var selectedTab by remember { mutableIntStateOf(0) }
         var selectedDate by remember { mutableStateOf(Date()) }
@@ -234,21 +269,7 @@ class HomeActivity : AppCompatActivity() {
             }
         }
 
-        LaunchedEffect(connectionState.successMessage) {
-            if (connectionState.successMessage != null) {
-                showRequestDialog = false
-                connectionViewModel.clearStatusMessages()
-            }
-        }
-        
-        LaunchedEffect(appointmentState.successMessage) {
-            if (appointmentState.successMessage != null) {
-                showAppointmentDialog = false
-                appointmentViewModel.clearMessages()
-            }
-        }
-
-        // Intercept back button to return to first tab if on another tab
+        // Dashboard level back handler: Reset to first tab
         BackHandler(enabled = selectedTab != 0) {
             selectedTab = 0
         }
@@ -256,36 +277,67 @@ class HomeActivity : AppCompatActivity() {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Kinetiq Rehab") },
+                    title = { Text("Moove", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = MooveBackground,
+                        titleContentColor = MooveOnBackground
+                    ),
+                    navigationIcon = {
+                        IconButton(onClick = onShowAchievements) {
+                            Icon(Icons.Default.Star, contentDescription = "Achievements", tint = MoovePrimary)
+                        }
+                    },
                     actions = {
+                        IconButton(onClick = onShowSettings) {
+                            Icon(Icons.Default.Notifications, contentDescription = "Settings", tint = MooveOnSurfaceVariant)
+                        }
                         IconButton(onClick = onLogout) {
-                            Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout")
+                            Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout", tint = Color(0xFFE57373))
                         }
                     }
                 )
             },
             bottomBar = {
-                NavigationBar {
+                NavigationBar(
+                    containerColor = MooveSurface,
+                    tonalElevation = 8.dp
+                ) {
                     NavigationBarItem(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
                         icon = { Icon(Icons.Default.Home, null) },
-                        label = { Text("Home") }
+                        label = { Text("Home") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MoovePrimary,
+                            selectedTextColor = MoovePrimary,
+                            indicatorColor = MooveSurfaceVariant
+                        )
                     )
                     NavigationBarItem(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
                         icon = { Icon(Icons.Default.Search, null) },
-                        label = { Text("Progress") }
+                        label = { Text("Progress") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MoovePrimary,
+                            selectedTextColor = MoovePrimary,
+                            indicatorColor = MooveSurfaceVariant
+                        )
                     )
                     NavigationBarItem(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
                         icon = { Icon(Icons.Default.DateRange, null) },
-                        label = { Text("Calendar") }
+                        label = { Text("Calendar") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MoovePrimary,
+                            selectedTextColor = MoovePrimary,
+                            indicatorColor = MooveSurfaceVariant
+                        )
                     )
                 }
-            }
+            },
+            containerColor = MooveBackground
         ) { padding ->
             Box(modifier = Modifier.padding(padding).fillMaxSize()) {
                 when (selectedTab) {
@@ -296,59 +348,59 @@ class HomeActivity : AppCompatActivity() {
                         onConnectClick = { showRequestDialog = true },
                         patientData = patientData
                     )
-                    1 -> LazyColumn(Modifier.fillMaxSize().padding(16.dp)) {
+                    1 -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
                         item {
-                            Text("Your Recovery Journey", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(16.dp))
+                            Text("Your Recovery Journey", style = MaterialTheme.typography.headlineSmall, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(24.dp))
                             
-                            // Overall Summary Card with Weighted Percentage
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                            ) {
-                                Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Recovery Status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                    Spacer(Modifier.height(8.dp))
+                            MooveCard(modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Recovery Status", style = MaterialTheme.typography.titleMedium, color = MooveOnSurfaceVariant)
+                                    Spacer(Modifier.height(12.dp))
                                     Text(
                                         "${analyticsState.overallSummary.weightedRecoveryPercentage.toInt()}%",
                                         style = MaterialTheme.typography.displayMedium,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = MaterialTheme.colorScheme.primary
+                                        fontWeight = FontWeight.Bold,
+                                        color = MoovePrimary
                                     )
-                                    Text("Overall Weighted Progress", style = MaterialTheme.typography.bodySmall)
+                                    Text("Overall Weighted Progress", style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
                                     
-                                    Spacer(Modifier.height(16.dp))
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
-                                    Spacer(Modifier.height(16.dp))
+                                    Spacer(Modifier.height(24.dp))
+                                    HorizontalDivider(color = MooveSurfaceVariant)
+                                    Spacer(Modifier.height(24.dp))
                                     
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("${analyticsState.overallSummary.avgOptimalityImprovement.toInt()}%", fontWeight = FontWeight.Bold)
-                                            Text("ROM Imp.", style = MaterialTheme.typography.labelSmall)
+                                            Text("${analyticsState.overallSummary.avgOptimalityImprovement.toInt()}%", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                                            Text("ROM Imp.", style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
                                         }
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("-${analyticsState.overallSummary.avgPainReduction.toInt()} pts", fontWeight = FontWeight.Bold, color = Color.Red)
-                                            Text("Pain Red.", style = MaterialTheme.typography.labelSmall)
+                                            Text("-${analyticsState.overallSummary.avgPainReduction.toInt()} pts", style = MaterialTheme.typography.titleMedium, color = Color(0xFFE57373), fontWeight = FontWeight.Bold)
+                                            Text("Pain Red.", style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
                                         }
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("${analyticsState.overallSummary.totalSessions}", fontWeight = FontWeight.Bold)
-                                            Text("Sessions", style = MaterialTheme.typography.labelSmall)
+                                            Text("${analyticsState.overallSummary.totalSessions}", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                                            Text("Sessions", style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
                                         }
                                     }
                                 }
                             }
                             
-                            Spacer(Modifier.height(24.dp))
-                            Text("Exercise Details", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text("Select an exercise to view detailed trends.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(32.dp))
+                            Text("Exercise Details", style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                            Text("Select an exercise to view detailed trends.", style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
+                            Spacer(Modifier.height(20.dp))
                         }
                         
                         val exercises = listOf(
                             ExerciseItem("Pendulum", "pendulum", Icons.Default.Refresh),
                             ExerciseItem("Wall Climb", "wall_climb", Icons.Default.KeyboardArrowUp),
                             ExerciseItem("External Rotation", "external_rotation", Icons.Default.PlayArrow),
-                            ExerciseItem("Crossover", "crossover", Icons.Default.Close)
+                            ExerciseItem("Crossover", "crossover", Icons.Default.Close),
+                            ExerciseItem("Lateral Arm Raise", "lateral_arm_raise", Icons.Default.Add),
+                            ExerciseItem("Forward Arm Raise", "forward_arm_raise", Icons.AutoMirrored.Filled.KeyboardArrowRight),
+                            ExerciseItem("Hitchhiker", "hitchhiker", Icons.Default.ThumbUp)
                         )
 
                         item {
@@ -356,7 +408,7 @@ class HomeActivity : AppCompatActivity() {
                                 columns = GridCells.Fixed(2),
                                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                                modifier = Modifier.height(300.dp) // Fixed height within LazyColumn item
+                                modifier = Modifier.height(650.dp) 
                             ) {
                                 items(exercises) { exercise ->
                                     ExerciseCard(exercise) {
@@ -366,80 +418,140 @@ class HomeActivity : AppCompatActivity() {
                             }
                         }
                     }
-                    2 -> Column(Modifier.fillMaxSize()) {
-                        GridCalendar(
-                            selectedDate = selectedDate, 
-                            onDateSelected = { selectedDate = it },
-                            modifier = Modifier.padding(16.dp)
-                        )
+                    2 -> {
+                        var appointmentsExpanded by remember { mutableStateOf(false) }
+                        var sessionsExpanded by remember { mutableStateOf(false) }
                         
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "Appointments",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            if (assignedDoctorId != null) {
-                                TextButton(onClick = { 
-                                    appointmentViewModel.loadBookedSlots(assignedDoctorId!!, selectedDate)
-                                    showAppointmentDialog = true 
-                                }) {
-                                    Icon(Icons.Default.Add, contentDescription = null)
-                                    Text("Request")
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            item {
+                                GridCalendar(
+                                    selectedDate = selectedDate, 
+                                    onDateSelected = { selectedDate = it },
+                                    modifier = Modifier.padding(16.dp)
+                                )
+                            }
+                            
+                            item {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { appointmentsExpanded = !appointmentsExpanded }
+                                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            "Appointments",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MooveOnBackground,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Icon(
+                                            if (appointmentsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                            contentDescription = null,
+                                            modifier = Modifier.padding(start = 8.dp).size(20.dp),
+                                            tint = MooveOnSurfaceVariant
+                                        )
+                                    }
+                                    if (assignedDoctorId != null) {
+                                        TextButton(onClick = { 
+                                            appointmentViewModel.loadBookedSlots(assignedDoctorId!!, selectedDate)
+                                            showAppointmentDialog = true 
+                                        }) {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = MoovePrimary)
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Request", color = MoovePrimary, fontWeight = FontWeight.SemiBold)
+                                        }
+                                    }
                                 }
                             }
-                        }
-                        
-                        val dailyAppointments = appointmentState.appointments.filter { 
-                            val cal1 = Calendar.getInstance().apply { time = it.date }
-                            val cal2 = Calendar.getInstance().apply { time = selectedDate }
-                            cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
-                            cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
-                        }
 
-                        if (dailyAppointments.isEmpty()) {
-                            Text(
-                                "No appointments scheduled for this day.",
-                                modifier = Modifier.padding(16.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
-                                items(dailyAppointments) { appt ->
-                                    AppointmentCard(appt)
-                                    Spacer(Modifier.height(8.dp))
+                            item {
+                                AnimatedVisibility(
+                                    visible = appointmentsExpanded,
+                                    enter = expandVertically(),
+                                    exit = shrinkVertically()
+                                ) {
+                                    val dailyAppointments = appointmentState.appointments.filter { 
+                                        val cal1 = Calendar.getInstance().apply { time = it.date }
+                                        val cal2 = Calendar.getInstance().apply { time = selectedDate }
+                                        cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+                                        cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+                                    }
+
+                                    Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+                                        if (dailyAppointments.isEmpty()) {
+                                            Text(
+                                                "No appointments scheduled for this day.",
+                                                modifier = Modifier.padding(vertical = 16.dp),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MooveOnSurfaceVariant
+                                            )
+                                        } else {
+                                            dailyAppointments.forEach { appt ->
+                                                AppointmentCard(appt)
+                                                Spacer(Modifier.height(12.dp))
+                                            }
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                    }
                                 }
                             }
-                        }
 
-                        HorizontalDivider()
+                            item {
+                                HorizontalDivider(color = MooveSurface, thickness = 8.dp)
+                            }
 
-                        Text(
-                            "Sessions for ${java.text.SimpleDateFormat("MMM dd, yyyy").format(selectedDate)}",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-                        
-                        if (analyticsState.isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-                        } else if (analyticsState.dailySessions.isEmpty()) {
-                            Text(
-                                "No sessions recorded for this day.",
-                                modifier = Modifier.padding(16.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
-                                items(analyticsState.dailySessions) { session ->
-                                    SessionHistoryCard(session)
-                                    Spacer(Modifier.height(8.dp))
+                            item {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { sessionsExpanded = !sessionsExpanded }
+                                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "Sessions for ${java.text.SimpleDateFormat("MMM dd").format(selectedDate)}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MooveOnBackground,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Icon(
+                                        if (sessionsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        modifier = Modifier.padding(start = 8.dp).size(20.dp),
+                                        tint = MooveOnSurfaceVariant
+                                    )
+                                }
+                            }
+                            
+                            item {
+                                AnimatedVisibility(
+                                    visible = sessionsExpanded,
+                                    enter = expandVertically(),
+                                    exit = shrinkVertically()
+                                ) {
+                                    Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+                                        if (analyticsState.isLoading) {
+                                            Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                                                CircularProgressIndicator(color = MoovePrimary)
+                                            }
+                                        } else if (analyticsState.dailySessions.isEmpty()) {
+                                            Text(
+                                                "No sessions recorded for this day.",
+                                                modifier = Modifier.padding(vertical = 16.dp),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MooveOnSurfaceVariant
+                                            )
+                                        } else {
+                                            analyticsState.dailySessions.forEach { session ->
+                                                SessionHistoryCard(session)
+                                                Spacer(Modifier.height(12.dp))
+                                            }
+                                        }
+                                        Spacer(Modifier.height(24.dp))
+                                    }
                                 }
                             }
                         }
@@ -454,32 +566,34 @@ class HomeActivity : AppCompatActivity() {
                     showRequestDialog = false 
                     connectionViewModel.clearStatusMessages()
                 },
-                title = { Text("Connect to Doctor") },
+                containerColor = MooveBackground,
+                shape = RoundedCornerShape(24.dp),
+                title = { Text("Connect to Doctor", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MooveOnBackground) },
                 text = {
                     Column {
-                        Text("Ask your doctor for their registered Kinetiq email.")
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
+                        Text("Ask your doctor for their registered Moove email.", style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
+                        Spacer(Modifier.height(20.dp))
+                        MooveTextField(
                             value = doctorEmail,
                             onValueChange = { doctorEmail = it },
-                            label = { Text("Doctor's Email") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            label = "Doctor's Email",
+                            placeholder = "doctor@moove.com"
                         )
                         connectionState.error?.let { 
-                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) 
+                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)) 
                         }
                     }
                 },
                 confirmButton = {
-                    Button(
+                    MoovePrimaryButton(
                         onClick = { connectionViewModel.sendRequest(doctorEmail) },
-                        enabled = doctorEmail.isNotBlank() && !connectionState.isLoading
+                        enabled = doctorEmail.isNotBlank() && !connectionState.isLoading,
+                        modifier = Modifier.height(48.dp)
                     ) {
                         if (connectionState.isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MooveOnPrimary)
                         } else {
-                            Text("Send Request")
+                            Text("Send Request", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                         }
                     }
                 },
@@ -488,7 +602,7 @@ class HomeActivity : AppCompatActivity() {
                         showRequestDialog = false 
                         connectionViewModel.clearStatusMessages()
                     }) {
-                        Text("Cancel")
+                        Text("Cancel", color = MooveOnSurfaceVariant, fontWeight = FontWeight.Medium)
                     }
                 }
             )
@@ -502,21 +616,23 @@ class HomeActivity : AppCompatActivity() {
 
             AlertDialog(
                 onDismissRequest = { showAppointmentDialog = false },
-                title = { Text("Request Appointment") },
+                containerColor = MooveBackground,
+                shape = RoundedCornerShape(24.dp),
+                title = { Text("Request Appointment", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MooveOnBackground) },
                 text = {
                     Column {
-                        Text("Request for ${java.text.SimpleDateFormat("MMM dd, yyyy").format(selectedDate)} with $assignedDoctorName")
-                        Spacer(Modifier.height(16.dp))
+                        Text("Request for ${java.text.SimpleDateFormat("MMM dd").format(selectedDate)} with $assignedDoctorName", style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
+                        Spacer(Modifier.height(20.dp))
                         
                         if (availableSlots.isEmpty()) {
-                            Text("No slots available for this day. Please choose another date.", color = MaterialTheme.colorScheme.error)
+                            Text("No slots available for this day. Please choose another date.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         } else {
-                            Text("Select Available Time Slot:", style = MaterialTheme.typography.labelLarge)
-                            Spacer(Modifier.height(8.dp))
+                            Text("Select Time Slot", style = MaterialTheme.typography.labelLarge, color = MooveOnBackground, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.height(12.dp))
                             
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(3),
-                                modifier = Modifier.height(120.dp),
+                                modifier = Modifier.height(140.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -524,60 +640,52 @@ class HomeActivity : AppCompatActivity() {
                                     val isSelected = selectedTimeSlot == slot
                                     Box(
                                         modifier = Modifier
-                                            .background(
-                                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-                                                RoundedCornerShape(8.dp)
-                                            )
-                                            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (isSelected) MoovePrimary else MooveSurfaceVariant)
                                             .clickable { selectedTimeSlot = slot }
-                                            .padding(8.dp),
+                                            .padding(vertical = 10.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             slot,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isSelected) MooveOnPrimary else MooveOnBackground,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                         )
                                     }
                                 }
                             }
                         }
 
-                        Spacer(Modifier.height(16.dp))
-                        OutlinedTextField(
+                        Spacer(Modifier.height(20.dp))
+                        MooveTextField(
                             value = note,
                             onValueChange = { note = it },
-                            label = { Text("Note (Optional)") },
-                            modifier = Modifier.fillMaxWidth()
+                            label = "Note (Optional)",
+                            placeholder = "Reason for visit..."
                         )
                     }
                 },
                 confirmButton = {
-                    Button(
+                    MoovePrimaryButton(
                         onClick = {
                             if (selectedTimeSlot != null) {
                                 appointmentViewModel.requestAppointment(assignedDoctorId!!, assignedDoctorName, selectedDate, selectedTimeSlot!!, note)
+                                showAppointmentDialog = false
                             }
                         }, 
-                        enabled = !appointmentState.isLoading && selectedTimeSlot != null
+                        enabled = !appointmentState.isLoading && selectedTimeSlot != null,
+                        modifier = Modifier.height(48.dp)
                     ) {
-                        Text("Send Request")
+                        Text("Send Request", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showAppointmentDialog = false }) {
-                        Text("Cancel")
+                        Text("Cancel", color = MooveOnSurfaceVariant, fontWeight = FontWeight.Medium)
                     }
                 }
             )
-        }
-    }
-
-    @Composable
-    fun SummaryItem(label: String, value: String, color: Color) {
-        Column {
-            Text(label, style = MaterialTheme.typography.bodySmall)
-            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = color)
         }
     }
 
@@ -588,54 +696,66 @@ class HomeActivity : AppCompatActivity() {
         showActions: Boolean = false, 
         onStatusUpdate: (AppointmentStatus) -> Unit = {}
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = when(appointment.status) {
-                    AppointmentStatus.ACCEPTED -> Color(0xFFE8F5E9)
-                    AppointmentStatus.PENDING -> Color(0xFFFFF3E0)
-                    AppointmentStatus.REJECTED -> Color(0xFFFFEBEE)
-                    else -> MaterialTheme.colorScheme.surfaceVariant
-                }
-            )
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        val statusColor = when(appointment.status) {
+            AppointmentStatus.ACCEPTED -> Color(0xFF4CAF50)
+            AppointmentStatus.PENDING -> Color(0xFFFFB703)
+            AppointmentStatus.REJECTED -> Color(0xFFE57373)
+            else -> MooveOnSurfaceVariant
+        }
+
+        MooveCard(modifier = Modifier.fillMaxWidth()) {
+            Column {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                     Column {
                         Text(
-                            if (isDoctorView) appointment.patientName else "With ${appointment.doctorName}",
+                            if (isDoctorView) appointment.patientName else "Dr. ${appointment.doctorName}",
                             style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MooveOnBackground
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(14.dp), tint = MoovePrimary)
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                appointment.timeSlot,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MoovePrimary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    Surface(
+                        color = statusColor.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            appointment.status.name,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            appointment.timeSlot,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
                     }
-                    Text(
-                        appointment.status.name,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = when(appointment.status) {
-                            AppointmentStatus.ACCEPTED -> Color(0xFF2E7D32)
-                            AppointmentStatus.PENDING -> Color(0xFFEF6C00)
-                            else -> Color.Gray
-                        }
-                    )
                 }
                 if (appointment.note.isNotBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(appointment.note, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(12.dp))
+                    Text(appointment.note, style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
                 }
                 
                 if (showActions && appointment.status == AppointmentStatus.PENDING) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(16.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         TextButton(onClick = { onStatusUpdate(AppointmentStatus.REJECTED) }) {
-                            Text("Reject", color = MaterialTheme.colorScheme.error)
+                            Text("Reject", color = Color(0xFFE57373), fontWeight = FontWeight.SemiBold)
                         }
-                        Button(onClick = { onStatusUpdate(AppointmentStatus.ACCEPTED) }) {
-                            Text("Accept")
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            onClick = { onStatusUpdate(AppointmentStatus.ACCEPTED) },
+                            colors = ButtonDefaults.buttonColors(containerColor = MoovePrimary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Accept", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -645,51 +765,52 @@ class HomeActivity : AppCompatActivity() {
 
     @Composable
     fun SessionHistoryCard(session: SessionResult) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        MooveCard(modifier = Modifier.fillMaxWidth()) {
+            Column {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        session.exercise.replaceFirstChar { it.uppercase() },
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        session.exercise.replace("_", " ").replaceFirstChar { it.uppercase() },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MooveOnBackground
                     )
                     Text(
-                        if (session.exercise.lowercase() == "crossover") "${session.results.peak_rom_degrees.toInt()}%" else "${session.results.peak_rom_degrees.toInt()}°",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                        "${session.results.peak_rom_degrees.toInt()}%",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MoovePrimary,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(4.dp))
-                    // Fetch real average pain if possible, otherwise use pre_session
+                    Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp), tint = MooveOnSurfaceVariant)
+                    Spacer(Modifier.width(6.dp))
                     val avgPain = if (session.pain_log.isNotEmpty()) {
                         session.pain_log.mapNotNull { it.level.toDoubleOrNull() }.average()
                     } else session.pre_session.pain_score.toDouble()
                     
-                    Text("Avg Pain: ${String.format("%.1f", avgPain)}/10", style = MaterialTheme.typography.bodyMedium)
+                    Text("Avg Pain Score: ${String.format("%.1f", avgPain)}", style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
                 }
 
                 if (session.form_flags.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
-                    Text("Form Feedback:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    session.form_flags.forEach { flag ->
-                        Text("• ${flag.flag}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    session.form_flags.take(2).forEach { flag ->
+                        Surface(
+                            color = Color(0xFFE57373).copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            Text(
+                                "• ${flag.flag}", 
+                                style = MaterialTheme.typography.labelSmall, 
+                                color = Color(0xFFE57373),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
-                }
-
-                if (session.journal_entry != null && session.journal_entry.text.isNotBlank()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("Notes:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Text(session.journal_entry.text, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -706,20 +827,21 @@ class HomeActivity : AppCompatActivity() {
         val context = LocalContext.current
         val prescribedExercises = patientData?.clinicalPrescription?.exercises?.filter { it.isActive } ?: emptyList()
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
                     Text(
                         "Welcome Back!",
                         style = MaterialTheme.typography.headlineMedium,
+                        color = MooveOnBackground,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         if (prescribedExercises.isEmpty()) "Select an exercise to begin your session." else "Complete your prescribed exercises for today.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MooveOnSurfaceVariant
                     )
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(24.dp))
                 }
             }
             
@@ -728,7 +850,10 @@ class HomeActivity : AppCompatActivity() {
                     ExerciseItem("Pendulum", "pendulum", Icons.Default.Refresh),
                     ExerciseItem("Wall Climb", "wall_climb", Icons.Default.KeyboardArrowUp),
                     ExerciseItem("External Rotation", "external_rotation", Icons.Default.PlayArrow),
-                    ExerciseItem("Crossover", "crossover", Icons.Default.Close)
+                    ExerciseItem("Crossover", "crossover", Icons.Default.Close),
+                    ExerciseItem("Lateral Arm Raise", "lateral_arm_raise", Icons.Default.Add),
+                    ExerciseItem("Forward Arm Raise", "forward_arm_raise", Icons.AutoMirrored.Filled.KeyboardArrowRight),
+                    ExerciseItem("Hitchhiker", "hitchhiker", Icons.Default.ThumbUp)
                 )
 
                 val displayExercises = if (prescribedExercises.isEmpty()) {
@@ -741,7 +866,7 @@ class HomeActivity : AppCompatActivity() {
                     columns = GridCells.Fixed(2),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.height(300.dp).padding(horizontal = 16.dp)
+                    modifier = Modifier.height(if (displayExercises.size > 4) 650.dp else 320.dp).padding(horizontal = 24.dp)
                 ) {
                     items(displayExercises) { exercise ->
                         val prescription = prescribedExercises.find { it.exerciseId == exercise.id }
@@ -761,29 +886,29 @@ class HomeActivity : AppCompatActivity() {
             }
 
             item {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(24.dp)) {
                     if (assignedDoctorId != null) {
-                        Button(
+                        MoovePrimaryButton(
                             onClick = { onChatWithDoctor(assignedDoctorId, assignedDoctorName) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = MaterialTheme.shapes.medium,
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.Email, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Chat with $assignedDoctorName")
+                            Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(20.dp), tint = MooveOnPrimary)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Chat with $assignedDoctorName", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(16.dp))
                     }
 
                     OutlinedButton(
                         onClick = onConnectClick,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.medium
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MoovePrimary),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MoovePrimary)
                     ) {
-                        Icon(Icons.Default.Person, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (assignedDoctorId == null) "Connect to Doctor" else "Change Doctor")
+                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(20.dp), tint = MoovePrimary)
+                        Spacer(Modifier.width(12.dp))
+                        Text(if (assignedDoctorId == null) "Connect to Doctor" else "Change Doctor", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -792,56 +917,63 @@ class HomeActivity : AppCompatActivity() {
 
     @Composable
     fun ExerciseCard(exercise: ExerciseItem, prescription: PrescribedExercise? = null, onClick: () -> Unit) {
-        Card(
+        MooveCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clickable(onClick = onClick),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                .clickable(onClick = onClick)
         ) {
             Column(
-                modifier = Modifier.fillMaxSize().padding(8.dp),
+                modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    exercise.icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(Modifier.height(8.dp))
+                Surface(
+                    color = MooveBackground,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.size(56.dp).border(1.dp, CardBorder, RoundedCornerShape(12.dp))
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            exercise.icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = MoovePrimary
+                        )
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
                 Text(
                     exercise.name,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Bold,
+                    color = MooveOnBackground
                 )
                 if (prescription != null) {
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "${prescription.sets} sets x ${prescription.reps} reps",
+                        "${prescription.sets} sets • ${prescription.reps} reps",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary
+                        color = MooveOnSurfaceVariant
                     )
                 }
             }
         }
     }
-}
 
-@Composable
-fun KinetiqTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = lightColorScheme(
-            primary = androidx.compose.ui.graphics.Color(0xFF2E7D32),
-            surfaceVariant = androidx.compose.ui.graphics.Color(0xFFF1F8E9)
-        ),
-        content = content
-    )
+    @Composable
+    private fun Icon(icon: ImageVector, contentDescription: String?, modifier: Modifier = Modifier, tint: Color) {
+        androidx.compose.material3.Icon(icon, contentDescription, modifier = modifier, tint = tint)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeActivity.DoctorDashboardContainer(onLogout: () -> Unit, onPatientClick: (String) -> Unit) {
+fun HomeActivity.DoctorDashboardContainer(
+    onLogout: () -> Unit, 
+    onPatientClick: (String) -> Unit,
+    onChatWithPatient: (String, String) -> Unit
+) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var selectedDate by remember { mutableStateOf(Date()) }
     
@@ -852,7 +984,6 @@ fun HomeActivity.DoctorDashboardContainer(onLogout: () -> Unit, onPatientClick: 
         appointmentViewModel.loadAppointmentsForDoctor()
     }
 
-    // Intercept back button to return to first tab if on another tab
     BackHandler(enabled = selectedTab != 0) {
         selectedTab = 0
     }
@@ -860,55 +991,77 @@ fun HomeActivity.DoctorDashboardContainer(onLogout: () -> Unit, onPatientClick: 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Doctor Dashboard", fontWeight = FontWeight.Bold) },
+                title = { Text("Provider Dashboard", fontWeight = FontWeight.Bold, color = MooveOnBackground) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MooveBackground),
                 actions = {
                     IconButton(onClick = onLogout) {
-                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout", tint = MaterialTheme.colorScheme.error)
+                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout", tint = Color(0xFFE57373))
                     }
                 }
             )
         },
         bottomBar = {
-            NavigationBar {
+            NavigationBar(containerColor = MooveSurface) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
                     icon = { Icon(Icons.Default.Notifications, null) },
-                    label = { Text("Alerts") }
+                    label = { Text("Alerts") },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = MoovePrimary, indicatorColor = MooveSurfaceVariant, selectedTextColor = MoovePrimary)
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
                     icon = { Icon(Icons.AutoMirrored.Filled.List, null) },
-                    label = { Text("Patients") }
+                    label = { Text("Patients") },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = MoovePrimary, indicatorColor = MooveSurfaceVariant, selectedTextColor = MoovePrimary)
                 )
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
                     icon = { Icon(Icons.Default.Email, null) },
-                    label = { Text("Requests") }
+                    label = { Text("Requests") },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = MoovePrimary, indicatorColor = MooveSurfaceVariant, selectedTextColor = MoovePrimary)
                 )
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.DateRange, null) },
-                    label = { Text("Calendar") }
+                    label = { Text("Schedule") },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = MoovePrimary, indicatorColor = MooveSurfaceVariant, selectedTextColor = MoovePrimary)
                 )
             }
-        }
+        },
+        containerColor = MooveBackground
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             when (selectedTab) {
                 0 -> AlertTriageScreen(hiltViewModel<DoctorDashboardViewModel>(), onPatientClick)
-                1 -> PatientListScreen(hiltViewModel<DoctorDashboardViewModel>(), onPatientClick)
+                1 -> PatientListScreen(
+                    viewModel = hiltViewModel<DoctorDashboardViewModel>(), 
+                    onPatientClick = onPatientClick,
+                    onChatClick = onChatWithPatient
+                )
                 2 -> RequestsScreen(hiltViewModel<ConnectionViewModel>())
                 3 -> Column(Modifier.fillMaxSize()) {
                     GridCalendar(selectedDate = selectedDate, onDateSelected = { selectedDate = it }, modifier = Modifier.padding(16.dp))
                     
                     var subTab by remember { mutableIntStateOf(0) }
-                    TabRow(selectedTabIndex = subTab) {
-                        Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("Scheduled") })
-                        Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("Requests") })
+                    TabRow(
+                        selectedTabIndex = subTab,
+                        containerColor = MooveSurface,
+                        contentColor = MoovePrimary,
+                        indicator = { tabPositions ->
+                            if (subTab < tabPositions.size) {
+                                TabRowDefaults.SecondaryIndicator(
+                                    Modifier.tabIndicatorOffset(tabPositions[subTab]),
+                                    color = MoovePrimary
+                                )
+                            }
+                        }
+                    ) {
+                        Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("Scheduled", style = MaterialTheme.typography.labelLarge, color = if (subTab == 0) MoovePrimary else MooveOnSurfaceVariant) })
+                        Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("Pending", style = MaterialTheme.typography.labelLarge, color = if (subTab == 1) MoovePrimary else MooveOnSurfaceVariant) })
                     }
 
                     val filteredAppointments = appointmentState.appointments.filter {
@@ -922,7 +1075,7 @@ fun HomeActivity.DoctorDashboardContainer(onLogout: () -> Unit, onPatientClick: 
 
                     if (filteredAppointments.isEmpty()) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No ${if (subTab == 0) "scheduled appointments" else "pending requests"} for this day.")
+                            Text("No ${if (subTab == 0) "scheduled appointments" else "pending requests"} for this day.", color = MooveOnSurfaceVariant)
                         }
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -934,7 +1087,7 @@ fun HomeActivity.DoctorDashboardContainer(onLogout: () -> Unit, onPatientClick: 
                                 ) { newStatus ->
                                     appointmentViewModel.updateStatus(appt.id, newStatus)
                                 }
-                                Spacer(Modifier.height(8.dp))
+                                Spacer(Modifier.height(12.dp))
                             }
                         }
                     }
@@ -952,49 +1105,50 @@ fun RequestsScreen(viewModel: ConnectionViewModel) {
         viewModel.observeIncomingRequests()
     }
 
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
         item {
-            Text("Pending Connections", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
+            Text("Pending Connections", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MooveOnBackground)
+            Spacer(Modifier.height(24.dp))
         }
         
         if (state.isLoading) {
             item {
                 Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(color = MoovePrimary)
                 }
             }
         } else if (state.incomingRequests.isEmpty()) {
             item { 
                 Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) {
-                    Text("No pending patient requests.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("No pending patient requests.", color = MooveOnSurfaceVariant)
                 }
             }
         }
 
         items(state.incomingRequests) { request ->
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
+            MooveCard(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                 Row(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(request.fromName, style = MaterialTheme.typography.titleLarge)
-                        Text(request.fromEmail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(request.fromName, style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                        Text(request.fromEmail, style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
                     }
                     Row {
-                        FilledIconButton(
+                        IconButton(
                             onClick = { viewModel.acceptRequest(request) },
-                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF4CAF50))
+                            modifier = Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.1f), RoundedCornerShape(12.dp))
                         ) {
-                            Icon(Icons.Default.Check, contentDescription = "Accept")
+                            Icon(Icons.Default.Check, contentDescription = "Accept", tint = Color(0xFF4CAF50))
                         }
-                        Spacer(Modifier.width(8.dp))
-                        IconButton(onClick = { viewModel.rejectRequest(request.id) }) {
-                            Icon(Icons.Default.Close, contentDescription = "Reject", tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(12.dp))
+                        IconButton(
+                            onClick = { viewModel.rejectRequest(request.id) },
+                            modifier = Modifier.background(Color(0xFFE57373).copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Reject", tint = Color(0xFFE57373))
                         }
                     }
                 }
@@ -1006,5 +1160,24 @@ fun RequestsScreen(viewModel: ConnectionViewModel) {
                 Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 16.dp))
             }
         }
+    }
+}
+
+@Composable
+fun MooveCard(
+    modifier: Modifier = Modifier,
+    shape: androidx.compose.ui.graphics.Shape = MaterialTheme.shapes.medium,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = modifier,
+        shape = shape,
+        color = MooveSurface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            content = content
+        )
     }
 }

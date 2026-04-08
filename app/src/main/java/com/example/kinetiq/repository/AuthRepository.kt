@@ -10,7 +10,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 sealed class AuthResult {
-    data class Success(val role: UserRole) : AuthResult()
+    data class Success(val role: UserRole? = null) : AuthResult()
     data class Error(val message: String) : AuthResult()
 }
 
@@ -22,9 +22,13 @@ class AuthRepository @Inject constructor(
     suspend fun login(email: String, pass: String): AuthResult {
         return try {
             val result = auth.signInWithEmailAndPassword(email.trim(), pass).await()
-            val uid = result.user?.uid ?: return AuthResult.Error("Authentication failed")
+            val user = result.user ?: return AuthResult.Error("Authentication failed")
             
-            val userDoc = db.collection("users").document(uid).get().await()
+            if (!user.isEmailVerified) {
+                return AuthResult.Error("Please verify your email address.")
+            }
+            
+            val userDoc = db.collection("users").document(user.uid).get().await()
             val roleStr = userDoc.getString("role")?.uppercase() ?: return AuthResult.Error("Role not found")
             val role = try {
                 UserRole.valueOf(roleStr)
@@ -42,7 +46,10 @@ class AuthRepository @Inject constructor(
         return try {
             val normalizedEmail = email.trim().lowercase(Locale.ROOT)
             val result = auth.createUserWithEmailAndPassword(normalizedEmail, pass).await()
-            val uid = result.user?.uid ?: return AuthResult.Error("Registration failed")
+            val user = result.user ?: return AuthResult.Error("Registration failed")
+            
+            // Send email verification
+            user.sendEmailVerification().await()
             
             val userProfile = UserProfile(
                 email = normalizedEmail,
@@ -50,17 +57,26 @@ class AuthRepository @Inject constructor(
                 displayName = displayName.trim()
             )
             
-            db.collection("users").document(uid).set(userProfile).await()
+            db.collection("users").document(user.uid).set(userProfile).await()
             
             if (role == UserRole.DOCTOR) {
-                db.collection("doctors").document(uid).set(mapOf("specialization" to "General"))
+                db.collection("doctors").document(user.uid).set(mapOf("specialization" to "General"))
             } else {
-                db.collection("patients").document(uid).set(mapOf("injuryType" to "None"))
+                db.collection("patients").document(user.uid).set(mapOf("injuryType" to "None"))
             }
             
             AuthResult.Success(role)
         } catch (e: Exception) {
             AuthResult.Error(e.localizedMessage ?: "Registration failed")
+        }
+    }
+
+    suspend fun resetPassword(email: String): AuthResult {
+        return try {
+            auth.sendPasswordResetEmail(email.trim()).await()
+            AuthResult.Success()
+        } catch (e: Exception) {
+            AuthResult.Error(e.localizedMessage ?: "Failed to send reset email")
         }
     }
 

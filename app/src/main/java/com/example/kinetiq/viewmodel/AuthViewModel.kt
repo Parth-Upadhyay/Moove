@@ -14,6 +14,7 @@ import javax.inject.Inject
 data class AuthUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
+    val message: String? = null,
     val userRole: UserRole? = null,
     val isSuccess: Boolean = false
 )
@@ -45,7 +46,11 @@ class AuthViewModel @Inject constructor(
             _uiState.value = AuthUiState(isLoading = true)
             when (val result = repository.signUp(email, pass, role, displayName)) {
                 is AuthResult.Success -> {
-                    _uiState.value = AuthUiState(isSuccess = true, userRole = result.role)
+                    _uiState.value = AuthUiState(
+                        isSuccess = true, 
+                        userRole = result.role,
+                        message = "Verification email sent. Please check your inbox."
+                    )
                 }
                 is AuthResult.Error -> {
                     _uiState.value = AuthUiState(error = result.message)
@@ -54,11 +59,20 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Critical for Production: Clears the successful login state.
-     * Must be called when logging out to prevent the UI from 
-     * immediately re-triggering the dashboard on re-entry.
-     */
+    fun resetPassword(email: String) {
+        viewModelScope.launch {
+            _uiState.value = AuthUiState(isLoading = true)
+            when (val result = repository.resetPassword(email)) {
+                is AuthResult.Success -> {
+                    _uiState.value = AuthUiState(message = "Password reset email sent!")
+                }
+                is AuthResult.Error -> {
+                    _uiState.value = AuthUiState(error = result.message)
+                }
+            }
+        }
+    }
+
     fun resetState() {
         _uiState.value = AuthUiState()
     }

@@ -10,24 +10,37 @@ import com.example.kinetiq.models.Keypoint
 
 class SkeletonOverlayView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
-    private val paintGreen = Paint().apply {
-        color = Color.GREEN
-        strokeWidth = 8f
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-    }
+    private val tealPrimary = Color.parseColor("#2EC4B6")
+    private val errorRed = Color.parseColor("#E57373")
+    private val accentOrange = Color.parseColor("#FFB703")
 
-    private val paintRed = Paint().apply {
-        color = Color.RED
+    private val paintCorrect = Paint().apply {
+        color = tealPrimary
         strokeWidth = 10f
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
+        isAntiAlias = true
+    }
+
+    private val paintIncorrect = Paint().apply {
+        color = errorRed
+        strokeWidth = 12f
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        isAntiAlias = true
     }
 
     private val pointPaint = Paint().apply {
-        color = Color.YELLOW
-        strokeWidth = 12f
+        color = Color.WHITE
         style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+
+    private val pointStrokePaint = Paint().apply {
+        color = tealPrimary
+        strokeWidth = 4f
+        style = Paint.Style.STROKE
+        isAntiAlias = true
     }
 
     private var keypoints: Map<String, Keypoint>? = null
@@ -48,12 +61,10 @@ class SkeletonOverlayView(context: Context, attrs: AttributeSet?) : View(context
             val start = kps[from]
             val end = kps[to]
             if (start != null && end != null && start.conf > 0.5 && end.conf > 0.5) {
-                // Logic to determine color: if either joint is "incorrect", color the line red.
-                // For "torso" error, we might color shoulders/hips red.
                 val isRed = incorrectJoints.any { it in from || it in to } || 
                            (incorrectJoints.contains("torso") && (from.contains("shoulder") || from.contains("hip")))
                 
-                val p = if (isRed) paintRed else paintGreen
+                val p = if (isRed) paintIncorrect else paintCorrect
                 canvas.drawLine(
                     start.x * width, start.y * height,
                     end.x * width, end.y * height,
@@ -79,9 +90,17 @@ class SkeletonOverlayView(context: Context, attrs: AttributeSet?) : View(context
         // Draw Joint Points
         kps.forEach { (name, kp) ->
             if (kp.conf > 0.5) {
-                val isRed = incorrectJoints.any { name.contains(it) } || (incorrectJoints.contains("torso") && (name.contains("shoulder") || name.contains("hip")))
-                pointPaint.color = if (isRed) Color.RED else Color.YELLOW
-                canvas.drawCircle(kp.x * width, kp.y * height, 8f, pointPaint)
+                val isRed = incorrectJoints.any { name.contains(it) } || 
+                           (incorrectJoints.contains("torso") && (name.contains("shoulder") || name.contains("hip")))
+                
+                val x = kp.x * width
+                val y = kp.y * height
+                
+                pointPaint.color = Color.WHITE
+                canvas.drawCircle(x, y, 10f, pointPaint)
+                
+                pointStrokePaint.color = if (isRed) errorRed else tealPrimary
+                canvas.drawCircle(x, y, 10f, pointStrokePaint)
             }
         }
     }

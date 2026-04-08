@@ -1,6 +1,7 @@
 package com.example.kinetiq.ui.dashboard
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,10 +16,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.kinetiq.models.Message
+import com.example.kinetiq.ui.theme.*
 import com.example.kinetiq.viewmodel.ChatViewModel
 import com.google.firebase.auth.FirebaseAuth
 import java.text.SimpleDateFormat
@@ -48,14 +50,19 @@ fun ChatScreen(
     }
 
     Scaffold(
+        containerColor = MooveBackground,
         topBar = {
-            TopAppBar(
-                title = { Text(otherUserName) },
+            CenterAlignedTopAppBar(
+                title = { Text(otherUserName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MooveOnBackground)
                     }
-                }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MooveBackground,
+                    titleContentColor = MooveOnBackground
+                )
             )
         }
     ) { padding ->
@@ -68,7 +75,8 @@ fun ChatScreen(
                 Text(
                     text = state.error ?: "An error occurred",
                     color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
 
@@ -77,8 +85,8 @@ fun ChatScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(vertical = 16.dp)
             ) {
                 items(state.messages) { message ->
@@ -90,28 +98,36 @@ fun ChatScreen(
             }
 
             Surface(
-                tonalElevation = 2.dp,
+                color = MooveSurface,
+                shadowElevation = 8.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
-                        .padding(8.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                         .navigationBarsPadding()
                         .imePadding(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextField(
+                    OutlinedTextField(
                         value = messageText,
                         onValueChange = { messageText = it },
-                        placeholder = { Text("Type a message...") },
-                        modifier = Modifier.weight(1f),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
-                        )
+                        placeholder = { Text("Type a message...", color = MooveOnSurfaceVariant) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MooveBackground,
+                            unfocusedContainerColor = MooveBackground,
+                            focusedBorderColor = MoovePrimary,
+                            unfocusedBorderColor = CardBorder,
+                            cursorColor = MoovePrimary,
+                            focusedTextColor = MooveOnBackground,
+                            unfocusedTextColor = MooveOnBackground
+                        ),
+                        singleLine = false,
+                        maxLines = 4
                     )
                     IconButton(
                         onClick = {
@@ -120,12 +136,19 @@ fun ChatScreen(
                                 messageText = ""
                             }
                         },
-                        enabled = messageText.isNotBlank()
+                        enabled = messageText.isNotBlank(),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(
+                                if (messageText.isNotBlank()) MoovePrimary else CardBorder,
+                                RoundedCornerShape(24.dp)
+                            )
                     ) {
                         Icon(
                             Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send",
-                            tint = if (messageText.isNotBlank()) MaterialTheme.colorScheme.primary else Color.Gray
+                            tint = if (messageText.isNotBlank()) MooveOnPrimary else MooveOnSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -137,43 +160,48 @@ fun ChatScreen(
 @Composable
 fun MessageBubble(message: Message, isCurrentUser: Boolean) {
     val alignment = if (isCurrentUser) Alignment.CenterEnd else Alignment.CenterStart
-    val bubbleColor = if (isCurrentUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val contentColor = if (isCurrentUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    val bubbleColor = if (isCurrentUser) MoovePrimary else MooveSurface
+    val contentColor = if (isCurrentUser) MooveOnPrimary else MooveOnBackground
     val shape = if (isCurrentUser) {
-        RoundedCornerShape(16.dp, 16.dp, 0.dp, 16.dp)
+        RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)
     } else {
-        RoundedCornerShape(16.dp, 16.dp, 16.dp, 0.dp)
+        RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp)
     }
 
     val timeString = remember(message.timestamp) {
         if (message.timestamp != null) {
-            SimpleDateFormat("HH:mm", Locale.getDefault()).format(message.timestamp)
+            SimpleDateFormat("h:mm a", Locale.getDefault()).format(message.timestamp)
         } else {
-            "..." // Show dots while the server timestamp is being generated
+            ""
         }
     }
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
         Column(horizontalAlignment = if (isCurrentUser) Alignment.End else Alignment.Start) {
-            Box(
+            Surface(
+                color = bubbleColor,
+                shape = shape,
+                shadowElevation = if (isCurrentUser) 2.dp else 1.dp,
                 modifier = Modifier
-                    .clip(shape)
-                    .background(bubbleColor)
-                    .padding(vertical = 8.dp, horizontal = 12.dp)
                     .widthIn(max = 280.dp)
+                    .then(if (!isCurrentUser) Modifier.border(1.dp, CardBorder, shape) else Modifier)
             ) {
-                Text(
-                    text = message.content,
-                    color = contentColor,
-                    fontSize = 16.sp
-                )
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Text(
+                        text = message.content,
+                        color = contentColor,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    if (timeString.isNotEmpty()) {
+                        Text(
+                            text = timeString,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isCurrentUser) MooveOnPrimary.copy(alpha = 0.7f) else MooveOnSurfaceVariant,
+                            modifier = Modifier.align(Alignment.End).padding(top = 4.dp)
+                        )
+                    }
+                }
             }
-            Text(
-                text = timeString,
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.Gray,
-                modifier = Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp)
-            )
         }
     }
 }
