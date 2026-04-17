@@ -1,9 +1,11 @@
 package com.example.kinetiq
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.view.View
 import android.widget.*
@@ -14,12 +16,15 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.ui.platform.ComposeView
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.kinetiq.exercises.Severity
 import com.example.kinetiq.models.*
+import com.example.kinetiq.ui.components.ExerciseDemoPlayer
+import com.example.kinetiq.ui.theme.MooveTheme
 import com.google.android.material.textfield.TextInputEditText
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
@@ -34,7 +39,7 @@ import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateListener {
+class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateListener, TextToSpeech.OnInitListener {
 
     private lateinit var sessionManager: PhysioSessionManager
     private lateinit var viewFinder: PreviewView
@@ -51,12 +56,13 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     // Pre-Session Views
     private lateinit var instructionLayout: ConstraintLayout
     private lateinit var videoInstruction: VideoView
+    private lateinit var composeDemoView: ComposeView
     private lateinit var prePainSeekBar: SeekBar
     private lateinit var prePainValue: TextView
     private lateinit var btnProceed: Button
     
     // Post-Session Report Views
-    private lateinit var reportLayout: View // Changed from ConstraintLayout to View to support ScrollView
+    private lateinit var reportLayout: View 
     private lateinit var reportReps: TextView
     private lateinit var reportTime: TextView
     private lateinit var reportPeakMotion: TextView
@@ -67,11 +73,16 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var poseDetector: PoseDetector
+    private var tts: TextToSpeech? = null
 
     private var selectedExercise: String = "pendulum"
     private var selectedSide: String = "right"
     private var currentIncorrectJoints: List<String> = emptyList()
     private var isSessionStarted = false
+    
+    // Voice settings loaded from main settings
+    private var voiceFeedbackEnabled: Boolean = false
+    private var voiceCountEnabled: Boolean = true
     
     private var sessionStartTime: Long = 0
     private var peakMotionAcrossSession: Double = 0.0
@@ -95,6 +106,10 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         
         selectedExercise = intent.getStringExtra("EXERCISE_TYPE") ?: "pendulum"
         selectedSide = intent.getStringExtra("SELECTED_SIDE") ?: "right"
+        
+        // Load voice settings passed from HomeActivity
+        voiceFeedbackEnabled = intent.getBooleanExtra("VOICE_FEEDBACK_ENABLED", false)
+        voiceCountEnabled = intent.getBooleanExtra("VOICE_COUNT_ENABLED", true)
 
         bindViews()
         setupListeners()
@@ -104,12 +119,20 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         val mainView = findViewById<View>(R.id.main)
         ViewCompat.setOnApplyWindowInsetsListener(mainView) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            val imeInsets = insets.getInsets(WindowInsetsCompat.Type.ime())
+            
+            v.setPadding(
+                systemBars.left, 
+                systemBars.top, 
+                systemBars.right, 
+                if (imeInsets.bottom > 0) imeInsets.bottom else systemBars.bottom
+            )
             insets
         }
 
         sessionManager = PhysioSessionManager(this)
         cameraExecutor = Executors.newSingleThreadExecutor()
+        tts = TextToSpeech(this, this)
 
         val options = AccuratePoseDetectorOptions.Builder()
             .setDetectorMode(AccuratePoseDetectorOptions.STREAM_MODE)
@@ -120,6 +143,12 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
 
         if (!allPermissionsGranted()) {
             requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale.US
         }
     }
 
@@ -137,6 +166,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         
         instructionLayout = findViewById(R.id.instructionLayout)
         videoInstruction = findViewById(R.id.videoInstruction)
+        composeDemoView = findViewById(R.id.composeDemoView)
         prePainSeekBar = findViewById(R.id.prePainSeekBar)
         prePainValue = findViewById(R.id.prePainValue)
         btnProceed = findViewById(R.id.btnProceed)
@@ -189,27 +219,42 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     }
 
     private fun setupExerciseInstruction() {
-        val videoName = when (selectedExercise.lowercase()) {
-            "pendulum" -> "pendulum"
-            "external_rotation", "external" -> "external"
-            "crossover" -> "crossover"
-            "wall_climb", "wallclimb" -> "wallclimb"
-            "lateral_arm_raise" -> "lateral"
-            "forward_arm_raise" -> "forward"
-            "hitchhiker" -> "hitchhiker"
-            else -> "pendulum"
-        }
-
-        try {
-            val videoUri = Uri.parse("android.resource://$packageName/raw/$videoName")
-            videoInstruction.setVideoURI(videoUri)
-            videoInstruction.setOnPreparedListener { mp ->
-                mp.isLooping = true
-                videoInstruction.start()
+        val exerciseId = selectedExercise.lowercase()
+        
+        if (exerciseId == "forward_arm_raise" || exerciseId == "lateral_arm_raise" || 
+            exerciseId == "external_rotation" || exerciseId == "crossover") {
+            videoInstruction.visibility = View.GONE
+            composeDemoView.visibility = View.VISIBLE
+            
+            val modelPath = "models/$exerciseId.glb"
+            composeDemoView.setContent {
+                MooveTheme {
+                    ExerciseDemoPlayer(modelPath = modelPath)
+                }
             }
+        } else {
+            composeDemoView.visibility = View.GONE
             videoInstruction.visibility = View.VISIBLE
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error playing video instruction", e)
+            
+            val videoName = when (exerciseId) {
+                "pendulum" -> "pendulum"
+                "external_rotation", "external" -> "external"
+                "crossover" -> "crossover"
+                "wall_climb", "wallclimb" -> "wallclimb"
+                "hitchhiker" -> "hitchhiker"
+                else -> "pendulum"
+            }
+
+            try {
+                val videoUri = Uri.parse("android.resource://$packageName/raw/$videoName")
+                videoInstruction.setVideoURI(videoUri)
+                videoInstruction.setOnPreparedListener { mp ->
+                    mp.isLooping = true
+                    videoInstruction.start()
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error playing video instruction", e)
+            }
         }
     }
 
@@ -221,6 +266,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         btnEndSession.visibility = View.VISIBLE
         isSessionStarted = true
         sessionStartTime = System.currentTimeMillis()
+        totalRepsAcrossSession = 0
         
         val initialInput = createDummyInput(selectedExercise, selectedSide)
         sessionManager.startSession(initialInput)
@@ -251,6 +297,13 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         val now = Date()
         val timestampStr = sdf.format(now)
 
+        val postPainEntry = PainEntry(
+            rep = totalRepsAcrossSession,
+            set = 1,
+            level = postPainSeekBar.progress.toString(),
+            timestamp_ms = System.currentTimeMillis()
+        )
+
         val sessionResult = SessionResult(
             session_id = UUID.randomUUID().toString(),
             patient_id = uid,
@@ -260,7 +313,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
             exercise = selectedExercise,
             side = selectedSide,
             protocol_stage = 1,
-            prescription = Prescription(selectedExercise, 3, 12, 10, selectedSide, null, null, null, 20, false, ""),
+            prescription = Prescription(selectedExercise, 3, 10, 10, selectedSide, null, null, null, 20, false, ""),
             pre_session = PreSession(initialPainScore, 0, 8, "normal", 0, false, false, ""),
             context = SessionContext(0.8f, true, 72, 50, emptyList()),
             results = PerformanceResults(
@@ -276,7 +329,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
                 calories_burned = 10
             ),
             rom_trend = RomTrend(peakMotionAcrossSession, peakMotionAcrossSession, 0.0, 0, 0),
-            pain_log = emptyList(),
+            pain_log = listOf(postPainEntry),
             form_flags = emptyList(),
             doctor_alerts = emptyList(),
             wearable_data = WearableSessionData(0, 0, 0),
@@ -291,8 +344,8 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         
         val userRef = db.collection("users").document(uid)
         batch.update(userRef, "totalSessions", FieldValue.increment(1))
-        // Simplified streak logic: increment it for now. In real app, check dates.
         batch.update(userRef, "streak", FieldValue.increment(1))
+        batch.update(userRef, "lastSessionDate", now)
 
         batch.commit()
             .addOnSuccessListener {
@@ -422,6 +475,8 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         super.onDestroy()
         cameraExecutor.shutdown()
         poseDetector.close()
+        tts?.stop()
+        tts?.shutdown()
     }
 
     // --- SessionUpdateListener Implementation ---
@@ -429,13 +484,28 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     override fun onVoiceFeedback(message: String, severity: Severity) {
         runOnUiThread {
             feedbackText.text = message
+            
+            val isCount = message.all { it.isDigit() } || message.contains("Set") || message.contains("ready")
+            
+            if (isCount && voiceCountEnabled) {
+                tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "count")
+            } else if (!isCount && voiceFeedbackEnabled) {
+                // For instructions/feedback: read fully and add 2s pause
+                tts?.speak(message, TextToSpeech.QUEUE_ADD, null, "feedback")
+                tts?.playSilentUtterance(2000, TextToSpeech.QUEUE_ADD, "pause")
+            }
         }
     }
 
     override fun onRepCountUpdated(count: Int, target: Int) {
         runOnUiThread {
             repCounterText.text = "$count / $target"
-            totalRepsAcrossSession += 1 // This is a bit simplified, but tracked for report
+        }
+    }
+
+    override fun onRepCompleted(delta: Int) {
+        runOnUiThread {
+            totalRepsAcrossSession += delta
         }
     }
     
@@ -468,6 +538,9 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     override fun onSessionEnded(reason: String, priority: String) {
         runOnUiThread {
             feedbackText.text = reason
+            if (voiceFeedbackEnabled) {
+                tts?.speak(reason, TextToSpeech.QUEUE_FLUSH, null, "end")
+            }
             endExerciseSession()
         }
     }
@@ -483,11 +556,23 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     }
 
     override fun onSecurityAlert(message: String) {
-        runOnUiThread { feedbackText.text = "ALERT: $message" }
+        runOnUiThread { 
+            feedbackText.text = "ALERT: $message"
+            if (voiceFeedbackEnabled) {
+                tts?.speak(message, TextToSpeech.QUEUE_ADD, null, "alert")
+                tts?.playSilentUtterance(2000, TextToSpeech.QUEUE_ADD, "pause")
+            }
+        }
     }
 
     override fun onPositioningTip(tip: String) {
-        runOnUiThread { feedbackText.text = tip }
+        runOnUiThread { 
+            feedbackText.text = tip
+            if (voiceFeedbackEnabled) {
+                tts?.speak(tip, TextToSpeech.QUEUE_ADD, null, "tip")
+                tts?.playSilentUtterance(2000, TextToSpeech.QUEUE_ADD, "pause")
+            }
+        }
     }
 
     override fun onPrescriptionAdjusted(newPrescription: Prescription) {
@@ -497,6 +582,9 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         runOnUiThread {
             if (seconds != null) {
                 feedbackText.text = "Hold: $seconds"
+                if (voiceCountEnabled) {
+                    tts?.speak(seconds.toString(), TextToSpeech.QUEUE_FLUSH, null, "hold")
+                }
             }
         }
     }

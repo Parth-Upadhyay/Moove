@@ -3,10 +3,11 @@
     android:color="#20FFFFFF">
     <item>
         <shape android:shape="rectangle">
+            <!-- Using theme colors: Teal Primary and Accent Sage -->
             <gradient
                 android:angle="0"
-                android:endColor="#3A86FF"
-                android:startColor="#2EC4B6" />
+                android:endColor="#8FA876"
+                android:startColor="#4E6B21" />
             <corners android:radius="16dp" />
         </shape>
     </item>

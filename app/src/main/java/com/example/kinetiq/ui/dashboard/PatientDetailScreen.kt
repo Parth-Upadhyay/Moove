@@ -1,6 +1,7 @@
 package com.example.kinetiq.ui.dashboard
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,6 +35,7 @@ import com.example.kinetiq.ui.theme.*
 import com.example.kinetiq.viewmodel.AnalyticsViewModel
 import com.example.kinetiq.viewmodel.DoctorDashboardViewModel
 import com.example.kinetiq.viewmodel.ExerciseTrendPoint
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,6 +131,7 @@ fun PatientDetailScreen(
 @Composable
 fun OverviewTab(patient: Patient, sessions: List<SessionResult>, analyticsViewModel: AnalyticsViewModel) {
     val analyticsState by analyticsViewModel.uiState.collectAsState()
+    var showAllSessions by remember { mutableStateOf(false) }
     
     Column(
         modifier = Modifier
@@ -157,15 +160,45 @@ fun OverviewTab(patient: Patient, sessions: List<SessionResult>, analyticsViewMo
         Spacer(Modifier.height(24.dp))
         
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            AdherenceCard("Adherence", "${(analyticsState.overallSummary.adherenceRate * 100).toInt()}%", Modifier.weight(1f))
+            AdherenceCard("Weekly Adherence", "${(analyticsState.overallSummary.adherenceRate * 100).toInt()}%", Modifier.weight(1f))
             AdherenceCard("Total Sessions", "${analyticsState.overallSummary.totalSessions}", Modifier.weight(1f))
         }
 
+        if (analyticsState.overallSummary.adherenceBreakdown.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            MooveCard(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    Text("Adherence Breakdown (Last Week)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MooveOnBackground)
+                    Spacer(Modifier.height(8.dp))
+                    analyticsState.overallSummary.adherenceBreakdown.forEach { entry ->
+                        val exerciseId = entry.key
+                        val stats = entry.value
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(
+                                exerciseId.replace("_", " ").replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }, 
+                                style = MaterialTheme.typography.bodySmall, 
+                                color = MooveOnSurfaceVariant
+                            )
+                            Text("${stats.first}/${stats.second} sets", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = MoovePrimary)
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(32.dp))
-        Text("Recent Sessions", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Recent Sessions", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+            if (sessions.size > 5) {
+                TextButton(onClick = { showAllSessions = !showAllSessions }) {
+                    Text(if (showAllSessions) "Show Less" else "View All", color = MoovePrimary)
+                }
+            }
+        }
         Spacer(Modifier.height(12.dp))
         
-        sessions.take(10).forEach { session ->
+        val sessionsToDisplay = if (showAllSessions) sessions else sessions.take(5)
+        sessionsToDisplay.forEach { session ->
             SessionReportItem(session, sessions)
             Spacer(Modifier.height(12.dp))
         }
@@ -187,6 +220,7 @@ fun AdherenceCard(label: String, value: String, modifier: Modifier = Modifier) {
 @Composable
 fun SessionReportItem(session: SessionResult, allSessions: List<SessionResult>) {
     val improvement = calculateImprovement(session, allSessions)
+    val maxPain = session.pain_log.mapNotNull { it.level.toIntOrNull() }.maxOrNull() ?: session.pre_session.pain_score
 
     MooveCard(modifier = Modifier.fillMaxWidth()) {
         Column {
@@ -195,10 +229,23 @@ fun SessionReportItem(session: SessionResult, allSessions: List<SessionResult>) 
                 Text(session.timestamp_end.take(10), style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
             }
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Peak ROM: ${session.results.peak_rom_degrees.toInt()}°", style = MaterialTheme.typography.bodyMedium, color = MooveOnBackground)
+                
+                Surface(
+                    color = (if (maxPain >= 7) Color(0xFFE57373) else if (maxPain >= 4) Color(0xFFFFB703) else Color(0xFF4CAF50)).copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "Pain: $maxPain/10",
+                        color = if (maxPain >= 7) Color(0xFFE57373) else if (maxPain >= 4) Color(0xFFFFB703) else Color(0xFF4CAF50),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
                 if (improvement != null) {
-                    Spacer(Modifier.width(8.dp))
                     Surface(
                         color = (if (improvement >= 0) Color(0xFF4CAF50) else Color(0xFFE57373)).copy(alpha = 0.1f),
                         shape = RoundedCornerShape(8.dp)

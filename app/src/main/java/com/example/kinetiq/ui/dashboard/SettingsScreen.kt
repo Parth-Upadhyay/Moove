@@ -57,9 +57,9 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Daily Reminders", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
+                        Text("Reminders", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
                         Text(
-                            "Notify me about incomplete exercises",
+                            "Daily exercise alerts",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -74,6 +74,64 @@ fun SettingsScreen(
                             uncheckedTrackColor = TextDisabled.copy(alpha = 0.5f)
                         )
                     )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            KinetiqCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Voice Feedback", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Corrections and tips",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        Switch(
+                            checked = uiState.notificationSettings.isVoiceFeedbackEnabled,
+                            onCheckedChange = { viewModel.toggleVoiceFeedback(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = SurfaceWhite,
+                                checkedTrackColor = TealPrimary,
+                                uncheckedThumbColor = SurfaceWhite,
+                                uncheckedTrackColor = TextDisabled.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+                    
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = CardBorder.copy(alpha = 0.5f))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Voice Counting", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Rep and rest countdowns",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        Switch(
+                            checked = uiState.notificationSettings.isVoiceCountEnabled,
+                            onCheckedChange = { viewModel.toggleVoiceCount(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = SurfaceWhite,
+                                checkedTrackColor = TealPrimary,
+                                uncheckedThumbColor = SurfaceWhite,
+                                uncheckedTrackColor = TextDisabled.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
                 }
             }
 

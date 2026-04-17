@@ -27,6 +27,8 @@ data class OverallSummary(
     val avgPainReduction: Double = 0.0,
     val totalSessions: Int = 0,
     val adherenceRate: Float = 0f,
+    val adherenceBreakdown: Map<String, Pair<Int, Int>> = emptyMap(), // exerciseId -> Pair(setsCompleted, setsPrescribed)
+    val exercisesLeftToday: Int = 0,
     val lastSessionDate: Date? = null
 )
 
@@ -111,18 +113,17 @@ class AnalyticsViewModel @Inject constructor(
     }
 
     private fun calculateOverallSummary(sessions: List<SessionResult>, patientData: Patient?): OverallSummary {
-        if (sessions.isEmpty()) return OverallSummary()
+        if (sessions.isEmpty() && patientData?.clinicalPrescription == null) return OverallSummary()
 
-        val sortedSessions = sessions.sortedBy { it.timestamp_end }
         val groupedByExercise = sessions.groupBy { it.exercise }
         
         var totalOptImprovement = 0.0
         var totalPainReduction = 0.0
-        var exercisesWithData = 0
+        var exercisesWithTrendData = 0
         
         var latestOptimalitySum = 0.0
         var latestPainSum = 0.0
-        var activeExercises = 0
+        var activeExercisesCount = 0
 
         groupedByExercise.forEach { (_, exerciseSessions) ->
             val sorted = exerciseSessions.sortedBy { it.timestamp_end }
@@ -131,7 +132,7 @@ class AnalyticsViewModel @Inject constructor(
             latestOptimalitySum += last.results.peak_rom_degrees
             val lastPain = last.pain_log.mapNotNull { it.level.toDoubleOrNull() }.average().takeIf { !it.isNaN() } ?: last.pre_session.pain_score.toDouble()
             latestPainSum += lastPain
-            activeExercises++
+            activeExercisesCount++
 
             if (exerciseSessions.size >= 2) {
                 val first = sorted.first()
@@ -139,49 +140,87 @@ class AnalyticsViewModel @Inject constructor(
                 
                 val firstPain = first.pain_log.mapNotNull { it.level.toDoubleOrNull() }.average().takeIf { !it.isNaN() } ?: first.pre_session.pain_score.toDouble()
                 totalPainReduction += (firstPain - lastPain)
-                exercisesWithData++
+                exercisesWithTrendData++
             }
         }
 
-        val avgOptImp = if (exercisesWithData > 0) totalOptImprovement / exercisesWithData else 0.0
-        val avgPainRed = if (exercisesWithData > 0) totalPainReduction / exercisesWithData else 0.0
+        val avgOptImp = if (exercisesWithTrendData > 0) totalOptImprovement / exercisesWithTrendData else 0.0
+        val avgPainRed = if (exercisesWithTrendData > 0) totalPainReduction / exercisesWithTrendData else 0.0
         
-        val weightedScore = if (activeExercises > 0) {
-            val avgLatestOpt = latestOptimalitySum / activeExercises
-            val avgLatestPain = latestPainSum / activeExercises
+        val weightedScore = if (activeExercisesCount > 0) {
+            val avgLatestOpt = latestOptimalitySum / activeExercisesCount
+            val avgLatestPain = latestPainSum / activeExercisesCount
+            // Optimality counts for 60%, Pain Reduction for 40%
             val painScore = ((10.0 - avgLatestPain).coerceIn(0.0, 10.0) / 10.0) * 100.0
             (avgLatestOpt * 0.6) + (painScore * 0.4)
         } else 0.0
 
-        val lastDate = try {
-            java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(sortedSessions.last().timestamp_end)
-        } catch (e: Exception) { null }
+        // Calculate Adherence for the LAST WEEK ONLY
+        val calendar = Calendar.getInstance()
+        calendar.add(Calendar.DAY_OF_YEAR, -7)
+        val oneWeekAgo = calendar.time
+        
+        val recentSessions = sessions.filter { 
+            parseIsoDate(it.timestamp_end)?.after(oneWeekAgo) == true 
+        }
 
-        val adherence = if (patientData?.clinicalPrescription != null) {
-            val prescribedCount = patientData.clinicalPrescription!!.exercises.count { it.isActive }
-            if (prescribedCount > 0) {
-                val last7Days = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }.time
-                val recentSessions = sessions.filter { 
-                    try {
-                        val d = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(it.timestamp_end)
-                        d?.after(last7Days) == true
-                    } catch (e: Exception) { false }
-                }
-                val completedPrescribed = patientData.clinicalPrescription!!.exercises
-                    .filter { it.isActive }
-                    .count { p -> recentSessions.any { s -> s.exercise == p.exerciseId } }
-                completedPrescribed.toFloat() / prescribedCount.toFloat()
-            } else 1.0f
-        } else (sessions.lastOrNull()?.adherence?.adherence_rate_30d ?: 0f)
+        val adherenceBreakdown = mutableMapOf<String, Pair<Int, Int>>()
+        var totalCompletedSets = 0
+        var totalPrescribedSets = 0
+
+        patientData?.clinicalPrescription?.exercises?.filter { it.isActive }?.forEach { prescribed ->
+            val exerciseSessions = recentSessions.filter { it.exercise == prescribed.exerciseId }
+            val completedSets = exerciseSessions.sumOf { it.results.sets_completed }
+            val prescribedSetsPerWeek = prescribed.sets * (patientData.clinicalPrescription?.frequencyPerWeek ?: 7)
+            
+            adherenceBreakdown[prescribed.exerciseId] = Pair(completedSets, prescribedSetsPerWeek)
+            totalCompletedSets += completedSets
+            totalPrescribedSets += prescribedSetsPerWeek
+        }
+
+        val adherenceRate = if (totalPrescribedSets > 0) {
+            (totalCompletedSets.toFloat() / totalPrescribedSets.toFloat()).coerceIn(0f, 1f)
+        } else 0f
+
+        // Calculate exercises left today
+        val today = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+        
+        val sessionsToday = sessions.filter { 
+            parseIsoDate(it.timestamp_end)?.after(today) == true 
+        }.map { it.exercise }.toSet()
+        
+        val prescribedExercises = patientData?.clinicalPrescription?.exercises?.filter { it.isActive }?.map { it.exerciseId } ?: emptyList()
+        val leftToday = prescribedExercises.count { it !in sessionsToday }
+
+        val lastDate = if (sessions.isNotEmpty()) {
+            parseIsoDate(sessions.sortedBy { it.timestamp_end }.last().timestamp_end)
+        } else null
 
         return OverallSummary(
             weightedRecoveryPercentage = weightedScore,
             avgOptimalityImprovement = avgOptImp,
             avgPainReduction = avgPainRed,
             totalSessions = sessions.size,
-            adherenceRate = adherence,
+            adherenceRate = adherenceRate,
+            adherenceBreakdown = adherenceBreakdown,
+            exercisesLeftToday = leftToday,
             lastSessionDate = lastDate
         )
+    }
+
+    private fun parseIsoDate(isoString: String): Date? {
+        return try {
+            java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(isoString)
+        } catch (e: Exception) {
+            try {
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).parse(isoString)
+            } catch (e2: Exception) { null }
+        }
     }
 
     private fun calculate3DayComparison(data: List<ExerciseTrendPoint>): String {

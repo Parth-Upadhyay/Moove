@@ -20,7 +20,7 @@ object SafetyManager {
         
         if (pre.pain_score >= 7) {
             return SafetyAction(
-                "Your pain is quite high today. Please rest and contact your physiotherapist.",
+                "High pain. Rest.",
                 Severity.CRITICAL,
                 blockSession = true
             )
@@ -28,14 +28,14 @@ object SafetyManager {
 
         if (pre.pain_score >= 5) {
             return SafetyAction(
-                "You're reporting moderate pain. Take it easy — stop if it gets worse.",
+                "Moderate pain. Careful.",
                 Severity.WARNING
             )
         }
 
         if (pre.medication_taken_mins_ago < 60) {
             return SafetyAction(
-                "You've taken pain medication recently. Be careful — medication can mask discomfort.",
+                "Meds taken. Careful.",
                 Severity.WARNING
             )
         }
@@ -46,7 +46,7 @@ object SafetyManager {
                 reps = (input.prescription.reps * 0.8).toInt()
             )
             return SafetyAction(
-                "You had a short night — we've lightened today's session slightly.",
+                "Light session today.",
                 Severity.GUIDANCE,
                 adjustedPrescription = adjusted
             )
@@ -54,7 +54,7 @@ object SafetyManager {
 
         if (context.heart_rate_bpm > 100) {
             return SafetyAction(
-                "Your heart rate looks elevated. Take a moment to rest before starting.",
+                "Pulse high. Rest.",
                 Severity.WARNING,
                 pauseSession = true
             )
@@ -66,7 +66,7 @@ object SafetyManager {
     fun checkMidSession(input: SessionInput, recentFormErrors: Int): SafetyAction? {
         if (input.patient_context.heart_rate_bpm > 130) {
             return SafetyAction(
-                "Your heart rate is quite high. Take a rest — don't push through.",
+                "Pulse high. Rest.",
                 Severity.WARNING,
                 pauseSession = true
             )
@@ -74,7 +74,7 @@ object SafetyManager {
 
         if (recentFormErrors >= 4) {
             return SafetyAction(
-                "Your form is changing — you may be tiring. Take a 60-second rest.",
+                "Tiring. Take rest.",
                 Severity.WARNING,
                 pauseSession = true
             )

@@ -13,7 +13,34 @@ class WallClimbExercise : Exercise {
 
     private enum class State { START, ACTIVE }
 
+    // Countdown variables
+    private var startTimeMs: Long = -1
+    private val PREP_TIME_MS = 5000L
+    private var isPrepFinished = false
+
     override fun processFrame(input: SessionInput): ExerciseResult {
+        // 1. Countdown Logic
+        if (startTimeMs == -1L) {
+            startTimeMs = input.timestamp_ms
+        }
+
+        val elapsedTime = input.timestamp_ms - startTimeMs
+        val remainingPrepTime = (PREP_TIME_MS - elapsedTime)
+        
+        if (remainingPrepTime > 0) {
+            return ExerciseResult(
+                repCount = 0,
+                status = "prepping",
+                reason = "Get ready!",
+                prepCountdown = (remainingPrepTime / 1000).toInt() + 1,
+                severity = Severity.GUIDANCE
+            )
+        }
+
+        if (!isPrepFinished) {
+            isPrepFinished = true
+        }
+
         val side = input.prescription.side
         val shoulder = input.keypoints["${side}_shoulder"]
         val wrist = input.keypoints["${side}_wrist"]
@@ -32,6 +59,7 @@ class WallClimbExercise : Exercise {
         }
 
         // Rep Counting Logic: Angle rises from below 30°, hits peak, returns below 30°
+        var voiceover: String? = null
         when (state) {
             State.START -> {
                 if (currentAngle > 30.0) {
@@ -51,6 +79,7 @@ class WallClimbExercise : Exercise {
 
                 if (currentAngle < 30.0) {
                     repCount++
+                    voiceover = repCount.toString()
                     state = State.START
                     peakAngleInCurrentRep = 0.0
                     isDescending = false
@@ -74,7 +103,9 @@ class WallClimbExercise : Exercise {
             currentRom = maxAngle,
             peakMotion = peakMotionValue,
             incorrect_joints = incorrectJoints,
-            reason = if (incorrectJoints.isNotEmpty()) "Peak angle was below 90°" else null
+            reason = if (incorrectJoints.isNotEmpty()) "Peak angle was below 90°" else null,
+            voiceover = voiceover,
+            prepCountdown = 0
         )
     }
 }

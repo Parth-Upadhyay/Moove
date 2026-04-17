@@ -10,15 +10,40 @@ class HitchhikerExercise : Exercise {
     private var maxAngle = 0.0 // Session max
     private var peakAngleInCurrentRep = 0.0
     
+    // Countdown variables
+    private var startTimeMs: Long = -1
+    private val PREP_TIME_MS = 5000L
+    private var isPrepFinished = false
+    
     // Limits based on Shoulder-Elbow-Wrist angle
-    // Forearm down = ~160° (LOW)
-    // Forearm vertical up = ~80° (HIGH)
-    private val LOWER_LIMIT = 150.0 // Slightly tighter than 160 to ensure return
-    private val UPPER_LIMIT = 90.0  // Reaching towards 80
+    private val LOWER_LIMIT = 130.0 
+    private val UPPER_LIMIT = 70.0  
 
     private enum class State { BELOW_LOW, MOVING_UP, ABOVE_HIGH }
 
     override fun processFrame(input: SessionInput): ExerciseResult {
+        // 1. Countdown Logic
+        if (startTimeMs == -1L) {
+            startTimeMs = input.timestamp_ms
+        }
+
+        val elapsedTime = input.timestamp_ms - startTimeMs
+        val remainingPrepTime = (PREP_TIME_MS - elapsedTime)
+        
+        if (remainingPrepTime > 0) {
+            return ExerciseResult(
+                repCount = 0,
+                status = "prepping",
+                reason = "Get ready!",
+                prepCountdown = (remainingPrepTime / 1000).toInt() + 1,
+                severity = Severity.GUIDANCE
+            )
+        }
+
+        if (!isPrepFinished) {
+            isPrepFinished = true
+        }
+
         val side = input.prescription.side
         val shoulder = input.keypoints["${side}_shoulder"]
         val elbow = input.keypoints["${side}_elbow"]
@@ -28,19 +53,15 @@ class HitchhikerExercise : Exercise {
             return ExerciseResult(repCount, "invalid", reason = "Keypoints missing")
         }
 
-        // Angle at elbow (Shoulder-Elbow-Wrist)
         val currentAngle = PoseMath.calculateAngle(shoulder, elbow, wrist)
+        var voiceover: String? = null
         
-        // Track session peak (minimum angle is "higher" effort here, but we usually track ROM)
-        // For Hitchhiker, we'll track the smallest angle achieved as the "peak" of the raise.
-        // But for consistency with other exercises, let's track the excursion.
         if (maxAngle == 0.0 || currentAngle < maxAngle) {
             maxAngle = currentAngle
         }
 
         when (state) {
             State.BELOW_LOW -> {
-                // Moving from 160 down towards 80
                 if (currentAngle < LOWER_LIMIT) {
                     state = State.MOVING_UP
                     peakAngleInCurrentRep = currentAngle
@@ -50,14 +71,11 @@ class HitchhikerExercise : Exercise {
                 if (currentAngle < peakAngleInCurrentRep) {
                     peakAngleInCurrentRep = currentAngle
                 }
-
-                // Count rep when high limit (90 or less) is reached
                 if (currentAngle <= UPPER_LIMIT) {
                     repCount++
+                    voiceover = repCount.toString()
                     state = State.ABOVE_HIGH
                 }
-                
-                // If they drop back down without completing
                 if (currentAngle > LOWER_LIMIT + 5.0) {
                     state = State.BELOW_LOW
                     peakAngleInCurrentRep = 180.0
@@ -67,8 +85,6 @@ class HitchhikerExercise : Exercise {
                 if (currentAngle < peakAngleInCurrentRep) {
                     peakAngleInCurrentRep = currentAngle
                 }
-                
-                // Must return above low limit (150) to reset
                 if (currentAngle >= LOWER_LIMIT) {
                     state = State.BELOW_LOW
                     peakAngleInCurrentRep = 180.0
@@ -76,18 +92,15 @@ class HitchhikerExercise : Exercise {
             }
         }
 
-        // We report ROM as (180 - minAngle) or similar to keep it positive/intuitive?
-        // Let's just report the angle and the peak achieved.
-        val displayRom = currentAngle
-        val displayPeak = maxAngle
-
         return ExerciseResult(
             repCount = repCount,
             status = "valid",
             severity = Severity.NONE,
-            currentRom = displayRom,
-            peakMotion = displayPeak,
-            incorrect_joints = emptyList()
+            currentRom = currentAngle,
+            peakMotion = maxAngle,
+            incorrect_joints = emptyList(),
+            voiceover = voiceover,
+            prepCountdown = 0
         )
     }
 }

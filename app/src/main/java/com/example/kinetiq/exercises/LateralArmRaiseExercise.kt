@@ -10,17 +10,41 @@ class LateralArmRaiseExercise : Exercise {
     private var maxAngle = 0.0
     private var peakAngleInCurrentRep = 0.0
     
-    // Limits
+    // Countdown variables
+    private var startTimeMs: Long = -1
+    private val PREP_TIME_MS = 5000L
+    private var isPrepFinished = false
+    
     private val LOWER_LIMIT = 60.0
     private val UPPER_LIMIT = 100.0
-    private val IDEAL_ANGLE = 80.0
-    // Lowered threshold further to be more permissive of "mild" bends.
-    // 135 degrees allows for quite a bit of bending while still being counted as "approx straight".
     private val ELBOW_STRAIGHT_THRESHOLD = 135.0 
+    private val LATERAL_X_THRESHOLD = 0.50
 
     private enum class State { BELOW_LOW, MOVING_UP, ABOVE_HIGH }
 
     override fun processFrame(input: SessionInput): ExerciseResult {
+        // 1. Countdown Logic
+        if (startTimeMs == -1L) {
+            startTimeMs = input.timestamp_ms
+        }
+
+        val elapsedTime = input.timestamp_ms - startTimeMs
+        val remainingPrepTime = (PREP_TIME_MS - elapsedTime)
+        
+        if (remainingPrepTime > 0) {
+            return ExerciseResult(
+                repCount = 0,
+                status = "prepping",
+                reason = "Get ready!",
+                prepCountdown = (remainingPrepTime / 1000).toInt() + 1,
+                severity = Severity.GUIDANCE
+            )
+        }
+
+        if (!isPrepFinished) {
+            isPrepFinished = true
+        }
+
         val side = input.prescription.side
         val shoulder = input.keypoints["${side}_shoulder"]
         val elbow = input.keypoints["${side}_elbow"]
@@ -31,75 +55,78 @@ class LateralArmRaiseExercise : Exercise {
             return ExerciseResult(repCount, "invalid", reason = "Keypoints missing")
         }
 
-        // Angle at shoulder between torso line (shoulder-to-hip) and arm line (shoulder-to-wrist)
         val currentShoulderAngle = PoseMath.calculateAngle(hip, shoulder, wrist)
-        
-        // Straight arm check: Angle at elbow (shoulder-elbow-wrist)
-        // 180 is perfectly straight.
         val elbowAngle = PoseMath.calculateAngle(shoulder, elbow, wrist)
         val isArmStraightEnough = elbowAngle >= ELBOW_STRAIGHT_THRESHOLD
 
-        if (currentShoulderAngle > maxAngle) {
-            maxAngle = currentShoulderAngle
+        // Horizontal Plane Validation
+        val bodyScale = abs(shoulder.y - hip.y)
+        val horizontalDistRatio = abs(wrist.x - shoulder.x) / bodyScale
+        val isMovingLateral = horizontalDistRatio > LATERAL_X_THRESHOLD
+
+        var voiceover: String? = null
+
+        // Logic gating
+        if (isMovingLateral) {
+            if (currentShoulderAngle > maxAngle) maxAngle = currentShoulderAngle
+
+            when (state) {
+                State.BELOW_LOW -> {
+                    if (currentShoulderAngle > LOWER_LIMIT) {
+                        state = State.MOVING_UP
+                        peakAngleInCurrentRep = currentShoulderAngle
+                    }
+                }
+                State.MOVING_UP -> {
+                    if (currentShoulderAngle > peakAngleInCurrentRep) peakAngleInCurrentRep = currentShoulderAngle
+                    if (currentShoulderAngle >= UPPER_LIMIT) {
+                        if (isArmStraightEnough) {
+                            repCount++
+                            voiceover = repCount.toString()
+                            state = State.ABOVE_HIGH
+                        }
+                    }
+                    if (currentShoulderAngle < LOWER_LIMIT - 5.0) {
+                        state = State.BELOW_LOW
+                        peakAngleInCurrentRep = 0.0
+                    }
+                }
+                State.ABOVE_HIGH -> {
+                    if (currentShoulderAngle > peakAngleInCurrentRep) peakAngleInCurrentRep = currentShoulderAngle
+                    if (currentShoulderAngle <= LOWER_LIMIT) {
+                        state = State.BELOW_LOW
+                        peakAngleInCurrentRep = 0.0
+                    }
+                }
+            }
         }
 
+        var status = "valid"
+        var reason: String? = null
         val incorrectJoints = mutableListOf<String>()
-        // Only flag if the bend is significant (under 135 deg) and they are in the active range
+
+        // Error Handling
+        if (currentShoulderAngle > 45.0 && !isMovingLateral) {
+            reason = "Move your arms out to the side, not in front"
+            status = "invalid"
+        } else if (!isArmStraightEnough && currentShoulderAngle > LOWER_LIMIT) {
+            reason = "Try to keep your arm straighter"
+        }
+
         if (!isArmStraightEnough && currentShoulderAngle > 45.0) {
             incorrectJoints.add("${side}_elbow")
         }
 
-        when (state) {
-            State.BELOW_LOW -> {
-                if (currentShoulderAngle > LOWER_LIMIT) {
-                    state = State.MOVING_UP
-                    peakAngleInCurrentRep = currentShoulderAngle
-                }
-            }
-            State.MOVING_UP -> {
-                if (currentShoulderAngle > peakAngleInCurrentRep) {
-                    peakAngleInCurrentRep = currentShoulderAngle
-                }
-
-                // Count rep when high limit (100) is reached
-                if (currentShoulderAngle >= UPPER_LIMIT) {
-                    if (isArmStraightEnough) {
-                        repCount++
-                        state = State.ABOVE_HIGH
-                    }
-                }
-                
-                // If they drop back down without completing, reset to low
-                if (currentShoulderAngle < LOWER_LIMIT - 5.0) {
-                    state = State.BELOW_LOW
-                    peakAngleInCurrentRep = 0.0
-                }
-            }
-            State.ABOVE_HIGH -> {
-                if (currentShoulderAngle > peakAngleInCurrentRep) {
-                    peakAngleInCurrentRep = currentShoulderAngle
-                }
-                
-                // Must return below low limit (60) to reset state for the next rep
-                if (currentShoulderAngle <= LOWER_LIMIT) {
-                    state = State.BELOW_LOW
-                    peakAngleInCurrentRep = 0.0
-                }
-            }
-        }
-
-        val status = if (incorrectJoints.isNotEmpty()) "invalid" else "valid"
-        val severity = if (incorrectJoints.isNotEmpty()) Severity.WARNING else Severity.NONE
-        val reason = if (!isArmStraightEnough && currentShoulderAngle > LOWER_LIMIT) "Try to keep your arm straighter" else null
-
         return ExerciseResult(
             repCount = repCount,
             status = status,
-            severity = severity,
-            currentRom = currentShoulderAngle,
-            peakMotion = maxAngle.coerceIn(0.0, 180.0),
             incorrect_joints = incorrectJoints,
-            reason = reason
+            reason = reason,
+            voiceover = voiceover,
+            currentRom = currentShoulderAngle,
+            peakMotion = maxAngle,
+            severity = if (status == "invalid") Severity.WARNING else Severity.NONE,
+            prepCountdown = 0
         )
     }
 }

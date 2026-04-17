@@ -3,6 +3,7 @@ package com.example.kinetiq
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
@@ -34,6 +35,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.kinetiq.models.*
@@ -42,9 +45,11 @@ import com.example.kinetiq.ui.components.GridCalendar
 import com.example.kinetiq.ui.dashboard.*
 import com.example.kinetiq.ui.theme.*
 import com.example.kinetiq.viewmodel.*
+import com.example.kinetiq.utils.DataSeeder
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.*
 
@@ -70,12 +75,18 @@ class HomeActivity : AppCompatActivity() {
                 var activeChatPartner by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var showAchievements by remember { mutableStateOf(false) }
                 var showSettings by remember { mutableStateOf(false) }
+                
+                // Local state for dashboard tabs
+                var selectedTab by remember { mutableIntStateOf(0) }
 
                 // Improved Back Button Handling
                 BackHandler(enabled = activeChatPartner != null || showRomAnalytics != null || selectedPatientId != null || showAchievements || showSettings) {
                     when {
                         activeChatPartner != null -> activeChatPartner = null
-                        showRomAnalytics != null -> showRomAnalytics = null
+                        showRomAnalytics != null -> {
+                            showRomAnalytics = null
+                            selectedTab = 1 // Take back to progress tab
+                        }
                         selectedPatientId != null -> selectedPatientId = null
                         showAchievements -> showAchievements = false
                         showSettings -> showSettings = false
@@ -86,18 +97,37 @@ class HomeActivity : AppCompatActivity() {
                     val auth = FirebaseAuth.getInstance()
                     val db = FirebaseFirestore.getInstance()
                     
-                    val user = auth.currentUser
+                    // Trigger Mock Data Seed (Development Only)
+                    launch {
+                        try {
+                            DataSeeder(db).seedMockData()
+                            Log.d("HomeActivity", "Mock data seeded successfully")
+                        } catch (e: Exception) {
+                            Log.e("HomeActivity", "Error seeding mock data", e)
+                        }
+                    }
+
+                    var user = auth.currentUser
                     if (user != null) {
                         try {
-                            val doc = db.collection("users").document(user.uid).get().await()
-                            val roleStr = doc.getString("role")?.uppercase()
-                            if (roleStr != null) {
-                                currentUserRole = try { UserRole.valueOf(roleStr) } catch(e: Exception) { UserRole.PATIENT }
-                            } else {
+                            // Reload user to get latest isEmailVerified status
+                            user.reload().await()
+                            user = auth.currentUser
+                            
+                            if (user != null && !user.isEmailVerified) {
                                 auth.signOut()
+                                currentUserRole = null
+                            } else if (user != null) {
+                                val doc = db.collection("users").document(user.uid).get().await()
+                                val roleStr = doc.getString("role")?.uppercase()
+                                if (roleStr != null) {
+                                    currentUserRole = try { UserRole.valueOf(roleStr) } catch(e: Exception) { UserRole.PATIENT }
+                                } else {
+                                    auth.signOut()
+                                }
                             }
                         } catch (e: Exception) {
-                            Log.e("HomeActivity", "Error fetching role", e)
+                            Log.e("HomeActivity", "Error checking auth status", e)
                             auth.signOut()
                         }
                     }
@@ -120,6 +150,7 @@ class HomeActivity : AppCompatActivity() {
                         viewModel = authViewModel
                     )
                 } else {
+                    val settingsViewModel: SettingsViewModel = hiltViewModel()
                     when (currentUserRole!!) {
                         UserRole.DOCTOR -> {
                             when {
@@ -134,7 +165,9 @@ class HomeActivity : AppCompatActivity() {
                                     RomDashboardScreen(
                                         patientId = showRomAnalytics!!.first,
                                         exerciseType = showRomAnalytics!!.second,
-                                        onBack = { showRomAnalytics = null }
+                                        onBack = { 
+                                            showRomAnalytics = null 
+                                        }
                                     )
                                 }
                                 selectedPatientId != null -> {
@@ -170,7 +203,7 @@ class HomeActivity : AppCompatActivity() {
                                 }
                                 showSettings -> {
                                     SettingsScreen(
-                                        viewModel = hiltViewModel<SettingsViewModel>(),
+                                        viewModel = settingsViewModel,
                                         onBack = { showSettings = false }
                                     )
                                 }
@@ -185,11 +218,16 @@ class HomeActivity : AppCompatActivity() {
                                     RomDashboardScreen(
                                         patientId = showRomAnalytics!!.first,
                                         exerciseType = showRomAnalytics!!.second,
-                                        onBack = { showRomAnalytics = null }
+                                        onBack = { 
+                                            showRomAnalytics = null
+                                            selectedTab = 1
+                                        }
                                     )
                                 }
                                 else -> {
                                     PatientDashboard(
+                                        selectedTab = selectedTab,
+                                        onTabSelected = { selectedTab = it },
                                         onLogout = {
                                             FirebaseAuth.getInstance().signOut()
                                             authViewModel.resetState()
@@ -205,7 +243,8 @@ class HomeActivity : AppCompatActivity() {
                                             }
                                         },
                                         onShowAchievements = { showAchievements = true },
-                                        onShowSettings = { showSettings = true }
+                                        onShowSettings = { showSettings = true },
+                                        settingsViewModel = settingsViewModel
                                     )
                                 }
                             }
@@ -219,13 +258,16 @@ class HomeActivity : AppCompatActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun PatientDashboard(
+        selectedTab: Int,
+        onTabSelected: (Int) -> Unit,
         onLogout: () -> Unit, 
         onChatWithDoctor: (String, String) -> Unit,
         onViewProgress: (String) -> Unit,
         onShowAchievements: () -> Unit,
-        onShowSettings: () -> Unit
+        onShowSettings: () -> Unit,
+        settingsViewModel: SettingsViewModel
     ) {
-        var selectedTab by remember { mutableIntStateOf(0) }
+        val context = LocalContext.current
         var selectedDate by remember { mutableStateOf(Date()) }
         
         val connectionViewModel: ConnectionViewModel = hiltViewModel()
@@ -235,6 +277,7 @@ class HomeActivity : AppCompatActivity() {
         val connectionState by connectionViewModel.uiState.collectAsState()
         val analyticsState by analyticsViewModel.uiState.collectAsState()
         val appointmentState by appointmentViewModel.uiState.collectAsState()
+        val settingsState by settingsViewModel.uiState.collectAsState()
         
         var doctorEmail by remember { mutableStateOf("") }
         var showRequestDialog by remember { mutableStateOf(false) }
@@ -269,9 +312,26 @@ class HomeActivity : AppCompatActivity() {
             }
         }
 
+        // Show toast on success
+        LaunchedEffect(connectionState.successMessage) {
+            connectionState.successMessage?.let {
+                Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                showRequestDialog = false
+                connectionViewModel.clearStatusMessages()
+            }
+        }
+
+        LaunchedEffect(appointmentState.successMessage) {
+            appointmentState.successMessage?.let {
+                Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                showAppointmentDialog = false
+                appointmentViewModel.clearMessages()
+            }
+        }
+
         // Dashboard level back handler: Reset to first tab
         BackHandler(enabled = selectedTab != 0) {
-            selectedTab = 0
+            onTabSelected(0)
         }
 
         Scaffold(
@@ -289,7 +349,7 @@ class HomeActivity : AppCompatActivity() {
                     },
                     actions = {
                         IconButton(onClick = onShowSettings) {
-                            Icon(Icons.Default.Notifications, contentDescription = "Settings", tint = MooveOnSurfaceVariant)
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MooveOnSurfaceVariant)
                         }
                         IconButton(onClick = onLogout) {
                             Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout", tint = Color(0xFFE57373))
@@ -304,7 +364,7 @@ class HomeActivity : AppCompatActivity() {
                 ) {
                     NavigationBarItem(
                         selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
+                        onClick = { onTabSelected(0) },
                         icon = { Icon(Icons.Default.Home, null) },
                         label = { Text("Home") },
                         colors = NavigationBarItemDefaults.colors(
@@ -315,7 +375,7 @@ class HomeActivity : AppCompatActivity() {
                     )
                     NavigationBarItem(
                         selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
+                        onClick = { onTabSelected(1) },
                         icon = { Icon(Icons.Default.Search, null) },
                         label = { Text("Progress") },
                         colors = NavigationBarItemDefaults.colors(
@@ -326,7 +386,7 @@ class HomeActivity : AppCompatActivity() {
                     )
                     NavigationBarItem(
                         selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
+                        onClick = { onTabSelected(2) },
                         icon = { Icon(Icons.Default.DateRange, null) },
                         label = { Text("Calendar") },
                         colors = NavigationBarItemDefaults.colors(
@@ -346,7 +406,8 @@ class HomeActivity : AppCompatActivity() {
                         assignedDoctorName = assignedDoctorName,
                         onChatWithDoctor = onChatWithDoctor,
                         onConnectClick = { showRequestDialog = true },
-                        patientData = patientData
+                        patientData = patientData,
+                        isVoiceEnabled = settingsState.notificationSettings.isVoiceFeedbackEnabled
                     )
                     1 -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
                         item {
@@ -615,7 +676,10 @@ class HomeActivity : AppCompatActivity() {
             val availableSlots = timeSlots.filter { it !in appointmentState.bookedSlots }
 
             AlertDialog(
-                onDismissRequest = { showAppointmentDialog = false },
+                onDismissRequest = { 
+                    showAppointmentDialog = false 
+                    appointmentViewModel.clearMessages()
+                },
                 containerColor = MooveBackground,
                 shape = RoundedCornerShape(24.dp),
                 title = { Text("Request Appointment", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MooveOnBackground) },
@@ -664,6 +728,9 @@ class HomeActivity : AppCompatActivity() {
                             label = "Note (Optional)",
                             placeholder = "Reason for visit..."
                         )
+                        appointmentState.error?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                        }
                     }
                 },
                 confirmButton = {
@@ -671,17 +738,23 @@ class HomeActivity : AppCompatActivity() {
                         onClick = {
                             if (selectedTimeSlot != null) {
                                 appointmentViewModel.requestAppointment(assignedDoctorId!!, assignedDoctorName, selectedDate, selectedTimeSlot!!, note)
-                                showAppointmentDialog = false
                             }
                         }, 
                         enabled = !appointmentState.isLoading && selectedTimeSlot != null,
                         modifier = Modifier.height(48.dp)
                     ) {
-                        Text("Send Request", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        if (appointmentState.isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MooveOnPrimary)
+                        } else {
+                            Text("Send Request", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        }
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showAppointmentDialog = false }) {
+                    TextButton(onClick = { 
+                        showAppointmentDialog = false 
+                        appointmentViewModel.clearMessages()
+                    }) {
                         Text("Cancel", color = MooveOnSurfaceVariant, fontWeight = FontWeight.Medium)
                     }
                 }
@@ -772,10 +845,13 @@ class HomeActivity : AppCompatActivity() {
                         session.exercise.replace("_", " ").replaceFirstChar { it.uppercase() },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MooveOnBackground
+                        color = MooveOnBackground,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        "${session.results.peak_rom_degrees.toInt()}%",
+                        "${session.results.peak_rom_degrees.toInt()}°",
                         style = MaterialTheme.typography.titleMedium,
                         color = MoovePrimary,
                         fontWeight = FontWeight.Bold
@@ -786,7 +862,7 @@ class HomeActivity : AppCompatActivity() {
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp), tint = MooveOnSurfaceVariant)
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(6.6.dp))
                     val avgPain = if (session.pain_log.isNotEmpty()) {
                         session.pain_log.mapNotNull { it.level.toDoubleOrNull() }.average()
                     } else session.pre_session.pain_score.toDouble()
@@ -822,7 +898,8 @@ class HomeActivity : AppCompatActivity() {
         assignedDoctorName: String,
         onChatWithDoctor: (String, String) -> Unit,
         onConnectClick: () -> Unit,
-        patientData: Patient?
+        patientData: Patient?,
+        isVoiceEnabled: Boolean
     ) {
         val context = LocalContext.current
         val prescribedExercises = patientData?.clinicalPrescription?.exercises?.filter { it.isActive } ?: emptyList()
@@ -874,6 +951,7 @@ class HomeActivity : AppCompatActivity() {
                             val intent = Intent(context, MainActivity::class.java).apply {
                                 putExtra("EXERCISE_TYPE", exercise.id)
                                 putExtra("SELECTED_SIDE", "right")
+                                putExtra("VOICE_FEEDBACK_ENABLED", isVoiceEnabled)
                                 prescription?.let {
                                     putExtra("TARGET_SETS", it.sets)
                                     putExtra("TARGET_REPS", it.reps)
@@ -947,14 +1025,18 @@ class HomeActivity : AppCompatActivity() {
                     exercise.name,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MooveOnBackground
+                    color = MooveOnBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
                 )
                 if (prescription != null) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "${prescription.sets} sets • ${prescription.reps} reps",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MooveOnSurfaceVariant
+                        color = MooveOnSurfaceVariant,
+                        maxLines = 1
                     )
                 }
             }

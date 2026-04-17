@@ -5,9 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.kinetiq.models.Message
 import com.example.kinetiq.models.MessageType
 import com.example.kinetiq.repository.ChatRepository
+import com.example.kinetiq.utils.InputSanitizer
+import com.example.kinetiq.utils.RateLimiter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 data class ChatUiState(
@@ -25,6 +28,9 @@ class ChatViewModel @Inject constructor(
     val uiState = _uiState.asStateFlow()
 
     private var currentPatientId: String? = null
+    
+    // Rate limit sending messages: 10 messages per minute
+    private val messageRateLimiter = RateLimiter(maxAttempts = 10, windowMillis = TimeUnit.MINUTES.toMillis(1))
 
     fun setPatient(patientId: String) {
         if (currentPatientId == patientId) return
@@ -45,9 +51,23 @@ class ChatViewModel @Inject constructor(
     }
 
     fun sendMessage(content: String) {
+        if (content.isBlank()) return
+        
+        if (content.length > 2000) {
+            _uiState.update { it.copy(error = "Message is too long (max 2000 characters)") }
+            return
+        }
+
+        if (!messageRateLimiter.shouldAllow()) {
+            _uiState.update { it.copy(error = "Sending messages too fast. Please wait a moment.") }
+            return
+        }
+
+        val sanitizedContent = InputSanitizer.sanitizeString(content, 2000)
         val patientId = currentPatientId ?: return
+        
         viewModelScope.launch {
-            chatRepo.sendMessage(patientId, content)
+            chatRepo.sendMessage(patientId, sanitizedContent)
         }
     }
 }

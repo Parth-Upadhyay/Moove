@@ -10,10 +10,37 @@ class HandsBehindHeadExercise : Exercise {
     private var holdStartMs: Long = 0
     private var maxRatio = 0.0
     private var currentHoldMet = false
+    
+    // Countdown variables
+    private var startTimeMs: Long = -1
+    private val PREP_TIME_MS = 5000L
+    private var isPrepFinished = false
 
     private enum class State { START, FLARING, PEAK, RETURNING }
 
     override fun processFrame(input: SessionInput): ExerciseResult {
+        // 1. Countdown Logic
+        if (startTimeMs == -1L) {
+            startTimeMs = input.timestamp_ms
+        }
+
+        val elapsedTime = input.timestamp_ms - startTimeMs
+        val remainingPrepTime = (PREP_TIME_MS - elapsedTime)
+        
+        if (remainingPrepTime > 0) {
+            return ExerciseResult(
+                repCount = 0,
+                status = "prepping",
+                reason = "Get ready!",
+                prepCountdown = (remainingPrepTime / 1000).toInt() + 1,
+                severity = Severity.GUIDANCE
+            )
+        }
+
+        if (!isPrepFinished) {
+            isPrepFinished = true
+        }
+
         val leftShoulder = input.keypoints["left_shoulder"]
         val rightShoulder = input.keypoints["right_shoulder"]
         val leftElbow = input.keypoints["left_elbow"]
@@ -23,7 +50,6 @@ class HandsBehindHeadExercise : Exercise {
             return ExerciseResult(repCount, "invalid", reason = "Keypoints missing")
         }
 
-        // Measure the angle (ratio) between left elbow X and right elbow X spreading apart relative to shoulder width
         val shoulderWidth = abs(rightShoulder.x - leftShoulder.x).toDouble()
         val elbowWidth = abs(rightElbow.x - leftElbow.x).toDouble()
         val currentRatio = if (shoulderWidth > 0) elbowWidth / shoulderWidth else 0.0
@@ -33,56 +59,56 @@ class HandsBehindHeadExercise : Exercise {
         }
 
         val targetHold = 3000L // 3 seconds
-        var currentHoldDuration = 0L
+        var voiceover: String? = null
 
+        // State Machine
         when (state) {
             State.START -> {
-                if (currentRatio > 1.0) state = State.FLARING
+                if (currentRatio > 0.8) state = State.FLARING
             }
             State.FLARING -> {
-                if (currentRatio > 1.3) {
+                if (currentRatio > 1.1) {
                     state = State.PEAK
                     holdStartMs = input.timestamp_ms
                 }
             }
             State.PEAK -> {
-                currentHoldDuration = input.timestamp_ms - holdStartMs
+                val currentHoldDuration = input.timestamp_ms - holdStartMs
                 if (currentHoldDuration >= targetHold) {
                     currentHoldMet = true
                     state = State.RETURNING
                 }
-                if (currentRatio < 1.2) {
+                if (currentRatio < 1.0) {
                     state = State.START
                     currentHoldMet = false
                 }
             }
             State.RETURNING -> {
-                if (currentRatio < 1.0) {
+                if (currentRatio < 0.8) {
                     repCount++
+                    voiceover = repCount.toString()
                     state = State.START
                     currentHoldMet = false
                 }
             }
         }
 
-        // Mark both elbows red if flare stays below 0.8x shoulder width
         val incorrectJoints = mutableListOf<String>()
-        if (currentRatio > 0.5 && maxRatio < 0.8) {
+        if (currentRatio > 0.3 && maxRatio < 0.6) {
             incorrectJoints.add("left_elbow")
             incorrectJoints.add("right_elbow")
         }
-
-        // Peak Motion is represented by the max ratio achieved
-        val peakMotionValue = maxRatio
 
         return ExerciseResult(
             repCount = repCount,
             status = if (incorrectJoints.isNotEmpty()) "invalid" else "valid",
             severity = if (incorrectJoints.isNotEmpty()) Severity.WARNING else Severity.NONE,
             currentRom = currentRatio,
-            peakMotion = peakMotionValue,
+            peakMotion = maxRatio,
             incorrect_joints = incorrectJoints,
-            holdCountdown = if (state == State.PEAK) (3 - (currentHoldDuration / 1000).toInt()) else null
+            holdCountdown = if (state == State.PEAK) (3 - ((input.timestamp_ms - holdStartMs) / 1000).toInt()) else null,
+            voiceover = voiceover,
+            prepCountdown = 0
         )
     }
 }

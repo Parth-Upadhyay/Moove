@@ -10,6 +10,8 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -52,6 +54,11 @@ class FirebaseRepository @Inject constructor(
         awaitClose { registration.remove() }
     }
 
+    /**
+     * Fetches sessions that should be flagged as "Alerts" for the doctor.
+     * Uses mathematical thresholds for pain increases, ROM drops, and low adherence.
+     * Limits results to the past 2 days.
+     */
     fun getAlertSessions(): Flow<Result<List<SessionResult>>> = callbackFlow {
         val doctorId = authRepo.getCurrentUserId()
         if (doctorId == null) {
@@ -68,9 +75,38 @@ class FirebaseRepository @Inject constructor(
                     return@addSnapshotListener
                 }
                 
+                val calendar = Calendar.getInstance()
+                calendar.add(Calendar.DAY_OF_YEAR, -2)
+                val twoDaysAgo = calendar.time
+
                 val alertSessions = snapshot?.documents?.mapNotNull { doc ->
                     try {
-                        doc.toObject(SessionResult::class.java)?.takeIf { it.doctor_alerts.isNotEmpty() }
+                        val session = doc.toObject(SessionResult::class.java) ?: return@mapNotNull null
+                        
+                        // Filter for sessions in the past 2 days only
+                        val sessionDate = parseIsoDate(session.timestamp_end)
+                        if (sessionDate == null || sessionDate.before(twoDaysAgo)) return@mapNotNull null
+
+                        // 1. Pain Spike: Any reported pain significantly higher than pre-session
+                        val maxPainDuringSession = session.pain_log.mapNotNull { it.level.toIntOrNull() }.maxOrNull() ?: 0
+                        val postPain = session.pain_log.lastOrNull()?.level?.toIntOrNull() ?: 0
+                        val painSpike = (maxOf(maxPainDuringSession, postPain) - session.pre_session.pain_score) > 2
+                        
+                        // 2. ROM Drop: Peak ROM decreased compared to last session
+                        val romDropped = session.rom_trend.delta < 0
+                        
+                        // 3. Adherence Issue: Adherence rate below 60%
+                        val lowAdherence = session.adherence.adherence_rate_30d < 0.6f
+                        
+                        // 4. Existing alerts or high absolute pain (either pre or during session)
+                        val hasManualAlert = session.doctor_alerts.isNotEmpty()
+                        val highAbsolutePain = session.pre_session.pain_score >= 8 || maxPainDuringSession >= 8 || postPain >= 8
+
+                        if (painSpike || romDropped || lowAdherence || hasManualAlert || highAbsolutePain) {
+                            session
+                        } else {
+                            null
+                        }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error parsing session ${doc.id}", e)
                         null
@@ -80,6 +116,20 @@ class FirebaseRepository @Inject constructor(
                 trySend(Result.success(alertSessions))
             }
         awaitClose { registration.remove() }
+    }
+
+    private fun parseIsoDate(isoString: String): Date? {
+        val formats = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd"
+        )
+        for (format in formats) {
+            try {
+                return SimpleDateFormat(format, Locale.US).parse(isoString)
+            } catch (e: Exception) { }
+        }
+        return null
     }
 
     fun getPatientSessions(patientId: String): Flow<Result<List<SessionResult>>> = callbackFlow {

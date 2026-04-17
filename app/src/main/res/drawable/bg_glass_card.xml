@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- White at 45% alpha as requested -->
-    <solid android:color="#73FFFFFF" />
-    <corners android:radius="20dp" />
-    <!-- Warm border #D9D2C0 at 60% alpha -->
+    <!-- Increased opacity to 85% for much better visibility against camera feed -->
+    <solid android:color="#D9FFFFFF" />
+    <corners android:radius="24dp" />
+    <!-- Thicker, more distinct border -->
     <stroke
-        android:width="1.5dp"
-        android:color="#99D9D2C0" />
+        android:width="2dp"
+        android:color="#B3D9D2C0" />
 </shape>

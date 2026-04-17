@@ -4,10 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.kinetiq.models.ConnectionRequest
 import com.example.kinetiq.repository.ConnectionRepository
+import com.example.kinetiq.utils.InputSanitizer
+import com.example.kinetiq.utils.RateLimiter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 data class ConnectionUiState(
@@ -27,8 +30,10 @@ class ConnectionViewModel @Inject constructor(
     
     private var observationJob: Job? = null
 
+    // Rate limit sending connection requests: 5 per 15 minutes
+    private val requestRateLimiter = RateLimiter(maxAttempts = 5, windowMillis = TimeUnit.MINUTES.toMillis(15))
+
     fun observeIncomingRequests() {
-        // Cancel existing job if any to ensure we are using the latest auth state
         observationJob?.cancel()
         observationJob = repository.getIncomingRequestsForDoctor()
             .onStart { _uiState.update { it.copy(isLoading = true, error = null) } }
@@ -42,9 +47,20 @@ class ConnectionViewModel @Inject constructor(
     }
 
     fun sendRequest(doctorEmail: String) {
+        val trimmedEmail = doctorEmail.trim()
+        if (!InputSanitizer.isValidEmail(trimmedEmail)) {
+            _uiState.update { it.copy(error = "Invalid email format") }
+            return
+        }
+
+        if (!requestRateLimiter.shouldAllow()) {
+            _uiState.update { it.copy(error = "Too many requests. Please wait before trying again.") }
+            return
+        }
+
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null, successMessage = null) }
-            repository.sendRequestToDoctor(doctorEmail)
+            repository.sendRequestToDoctor(trimmedEmail)
                 .onSuccess { 
                     _uiState.update { it.copy(isLoading = false, successMessage = "Request sent successfully!") }
                 }

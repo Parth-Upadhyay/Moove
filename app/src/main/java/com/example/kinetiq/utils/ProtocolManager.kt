@@ -24,10 +24,10 @@ object ProtocolManager {
 
     fun getStageMessage(stage: Int): String {
         return when (stage) {
-            1 -> "This is early recovery — gentle movement is the goal, not effort."
-            2 -> "You're building range of motion. Slow and steady is right."
-            3 -> "Now we start working the muscle. Form matters more than range."
-            4 -> "You're in the strengthening phase. Push a little each session."
+            1 -> "Move gently."
+            2 -> "Build motion."
+            3 -> "Focus form."
+            4 -> "Stay strong."
             else -> ""
         }
     }
