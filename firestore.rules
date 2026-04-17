@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is a doctor
+    function isDoctor() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'DOCTOR';
+    }
+
+    // Users collection: Users can only read/write their own profile
+    match /users/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || isDoctor());
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Patients collection:
+    // - Patients can read/write their own data
+    // - Doctors can read/write data for patients assigned to them
+    match /patients/{patientId} {
+      allow read, write: if request.auth != null && (
+        request.auth.uid == patientId ||
+        (isDoctor() && resource.data.doctorId == request.auth.uid) ||
+        (isDoctor() && request.resource.data.doctorId == request.auth.uid)
+      );
+    }
+
+    // Messages collection:
+    // - Users can only see messages where they are either sender or receiver
+    // - Doctors can only see messages for their assigned patients (enforced by the query in app)
+    match /messages/{messageId} {
+      allow read, write: if request.auth != null && (
+        request.auth.uid == resource.data.senderId ||
+        request.auth.uid == resource.data.receiverId ||
+        request.auth.uid == request.resource.data.senderId ||
+        request.auth.uid == request.resource.data.receiverId
+      );
+    }
+
+    // Sessions collection:
+    // - Patients can read/write their own sessions
+    // - Doctors can read sessions of their assigned patients
+    match /sessions/{sessionId} {
+      allow read: if request.auth != null && (
+        resource.data.patient_id == request.auth.uid ||
+        (isDoctor() && resource.data.doctor_id == request.auth.uid)
+      );
+      allow write: if request.auth != null && request.auth.uid == request.resource.data.patient_id;
+    }
+
+    // Connection Requests:
+    // - Patients can create and read their own requests
+    // - Doctors can read and update requests sent to them
+    match /connection_requests/{requestId} {
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.fromId;
+      allow read, update: if request.auth != null && (
+        request.auth.uid == resource.data.fromId ||
+        request.auth.uid == resource.data.toId
+      );
+    }
+
+    // Appointments:
+    // - Patients can read/write their own appointments
+    // - Doctors can read/update appointments scheduled with them
+    match /appointments/{appointmentId} {
+      allow read, write: if request.auth != null && (
+        resource.data.patientId == request.auth.uid ||
+        resource.data.doctorId == request.auth.uid ||
+        request.resource.data.patientId == request.auth.uid ||
+        request.resource.data.doctorId == request.auth.uid
+      );
+    }
+
+    // Settings: Users can only access their own settings
+    match /settings/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

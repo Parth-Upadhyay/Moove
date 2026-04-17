@@ -14,6 +14,9 @@
 .cxx
 local.properties
 
+# Secrets
+secret.properties
+
 # Firebase configuration file
 google-services.json
 app/google-services.json
