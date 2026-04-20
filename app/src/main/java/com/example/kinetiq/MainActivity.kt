@@ -228,12 +228,13 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     private fun setupExerciseInstruction() {
         val exerciseId = selectedExercise.lowercase()
         
-        if (exerciseId == "forward_arm_raise" || exerciseId == "lateral_arm_raise" || 
-            exerciseId == "external_rotation" || exerciseId == "crossover") {
+        if (exerciseId == "forward_arm_raise" || exerciseId == "lateral_arm_raise" ||
+            exerciseId == "external_rotation" || exerciseId == "crossover" || exerciseId == "pendulum") {
             videoInstruction.visibility = View.GONE
             composeDemoView.visibility = View.VISIBLE
             
-            val modelPath = "models/$exerciseId.glb"
+            val modelName = if (exerciseId == "pendulum") "pendulum_model" else exerciseId
+            val modelPath = "models/$modelName.glb"
             composeDemoView.setContent {
                 MooveTheme {
                     ExerciseDemoPlayer(modelPath = modelPath)
