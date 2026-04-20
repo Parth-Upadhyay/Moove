@@ -1,5 +1,6 @@
 package com.example.kinetiq.ui.dashboard
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,147 +30,99 @@ fun SettingsScreen(
     var showTimePicker by remember { mutableStateOf(false) }
 
     Scaffold(
-        containerColor = CreamyWhite,
+        containerColor = MooveBackground,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MooveOnBackground)
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = CreamyWhite)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MooveBackground,
+                    titleContentColor = MooveOnBackground
+                )
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 24.dp)
+        // Fade in content once loaded to avoid flickering
+        AnimatedVisibility(
+            visible = !uiState.isLoading || uiState.notificationSettings.userId.isNotEmpty(),
+            enter = fadeIn() + expandVertically(),
+            modifier = Modifier.padding(padding)
         ) {
-            Spacer(Modifier.height(16.dp))
-            
-            KinetiqCard(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Reminders", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
-                        Text(
-                            "Daily exercise alerts",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp)
+            ) {
+                Spacer(Modifier.height(16.dp))
+                
+                MooveCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Reminders", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Daily exercise alerts",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MooveOnSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = uiState.notificationSettings.isEnabled,
+                            onCheckedChange = { viewModel.toggleNotifications(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MoovePrimary,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = TextDisabled.copy(alpha = 0.5f)
+                            )
                         )
                     }
-                    Switch(
-                        checked = uiState.notificationSettings.isEnabled,
-                        onCheckedChange = { viewModel.toggleNotifications(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = SurfaceWhite,
-                            checkedTrackColor = TealPrimary,
-                            uncheckedThumbColor = SurfaceWhite,
-                            uncheckedTrackColor = TextDisabled.copy(alpha = 0.5f)
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                MooveCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        SettingSwitchRow(
+                            title = "Voice Feedback",
+                            subtitle = "Corrections and tips",
+                            checked = uiState.notificationSettings.isVoiceFeedbackEnabled,
+                            onCheckedChange = { viewModel.toggleVoiceFeedback(it) }
                         )
+                        
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = CardBorder.copy(alpha = 0.5f))
+                        
+                        SettingSwitchRow(
+                            title = "Voice Counting",
+                            subtitle = "Rep and rest countdowns",
+                            checked = uiState.notificationSettings.isVoiceCountEnabled,
+                            onCheckedChange = { viewModel.toggleVoiceCount(it) }
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                if (uiState.notificationSettings.isEnabled) {
+                    ReminderTimesSection(
+                        times = uiState.notificationSettings.reminderTimes,
+                        onAddClick = { showTimePicker = true },
+                        onRemoveClick = { viewModel.removeReminderTime(it) }
                     )
                 }
             }
-
-            Spacer(Modifier.height(16.dp))
-
-            KinetiqCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Voice Feedback", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
-                            Text(
-                                "Corrections and tips",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                        }
-                        Switch(
-                            checked = uiState.notificationSettings.isVoiceFeedbackEnabled,
-                            onCheckedChange = { viewModel.toggleVoiceFeedback(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = SurfaceWhite,
-                                checkedTrackColor = TealPrimary,
-                                uncheckedThumbColor = SurfaceWhite,
-                                uncheckedTrackColor = TextDisabled.copy(alpha = 0.5f)
-                            )
-                        )
-                    }
-                    
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = CardBorder.copy(alpha = 0.5f))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Voice Counting", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
-                            Text(
-                                "Rep and rest countdowns",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                        }
-                        Switch(
-                            checked = uiState.notificationSettings.isVoiceCountEnabled,
-                            onCheckedChange = { viewModel.toggleVoiceCount(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = SurfaceWhite,
-                                checkedTrackColor = TealPrimary,
-                                uncheckedThumbColor = SurfaceWhite,
-                                uncheckedTrackColor = TextDisabled.copy(alpha = 0.5f)
-                            )
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            if (uiState.notificationSettings.isEnabled) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Reminder Times", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
-                    IconButton(
-                        onClick = { showTimePicker = true },
-                        modifier = Modifier.background(TealPrimary.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Time", tint = TealPrimary)
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(uiState.notificationSettings.reminderTimes) { time ->
-                        KinetiqCard(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(time, style = MaterialTheme.typography.titleLarge, color = TextPrimary, fontWeight = FontWeight.Medium)
-                                IconButton(onClick = { viewModel.removeReminderTime(time) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFE57373))
-                                }
-                            }
-                        }
-                    }
-                }
+        }
+        
+        if (uiState.isLoading && uiState.notificationSettings.userId.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = MoovePrimary)
             }
         }
     }
@@ -187,6 +140,77 @@ fun SettingsScreen(
 }
 
 @Composable
+private fun SettingSwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = MoovePrimary,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = TextDisabled.copy(alpha = 0.5f)
+            )
+        )
+    }
+}
+
+@Composable
+private fun ReminderTimesSection(
+    times: List<String>,
+    onAddClick: () -> Unit,
+    onRemoveClick: (String) -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("Reminder Times", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+            IconButton(
+                onClick = onAddClick,
+                modifier = Modifier.background(MoovePrimary.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add Time", tint = MoovePrimary)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.heightIn(max = 400.dp)) {
+            items(times) { time ->
+                MooveCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(time, style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Medium)
+                        IconButton(onClick = { onRemoveClick(time) }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFE57373))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun TimePickerDialog(
     onDismiss: () -> Unit,
     onTimeSelected: (Int, Int) -> Unit
@@ -196,7 +220,7 @@ fun TimePickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = SurfaceWhite,
+        containerColor = MooveSurface,
         shape = RoundedCornerShape(24.dp),
         title = { Text("Set Reminder Time", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
         text = {
@@ -205,14 +229,14 @@ fun TimePickerDialog(
                 horizontalArrangement = Arrangement.Center,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                KinetiqTextField(
+                MooveTextField(
                     value = hourStr,
                     onValueChange = { if (it.length <= 2 && it.all { c -> c.isDigit() }) hourStr = it },
                     label = "Hour",
                     modifier = Modifier.width(80.dp)
                 )
                 Text(" : ", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(horizontal = 8.dp))
-                KinetiqTextField(
+                MooveTextField(
                     value = minStr,
                     onValueChange = { if (it.length <= 2 && it.all { c -> c.isDigit() }) minStr = it },
                     label = "Min",
@@ -221,7 +245,7 @@ fun TimePickerDialog(
             }
         },
         confirmButton = {
-            KinetiqPrimaryButton(
+            MoovePrimaryButton(
                 onClick = { 
                     val h = hourStr.toIntOrNull() ?: 9
                     val m = minStr.toIntOrNull() ?: 0
@@ -234,7 +258,7 @@ fun TimePickerDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = TextSecondary)
+                Text("Cancel", color = MooveOnSurfaceVariant)
             }
         }
     )

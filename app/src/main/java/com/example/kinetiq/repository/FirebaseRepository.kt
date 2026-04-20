@@ -2,8 +2,10 @@ package com.example.kinetiq.repository
 
 import android.util.Log
 import com.example.kinetiq.models.ClinicalPrescription
+import com.example.kinetiq.models.MedicalNote
 import com.example.kinetiq.models.Patient
 import com.example.kinetiq.models.SessionResult
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
@@ -203,5 +205,60 @@ class FirebaseRepository @Inject constructor(
                 }
             }
         awaitClose { registration.remove() }
+    }
+
+    fun getMedicalNotes(patientId: String): Flow<Result<List<MedicalNote>>> = callbackFlow {
+        val registration = db.collection("medical_notes")
+            .whereEqualTo("patientId", patientId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error fetching medical notes", error)
+                    trySend(Result.failure(error))
+                    return@addSnapshotListener
+                }
+                val notes = snapshot?.documents?.mapNotNull { doc ->
+                    try {
+                        // Manual parsing to handle ServerTimestamp behavior explicitly
+                        val title = doc.getString("title") ?: ""
+                        val content = doc.getString("content") ?: ""
+                        val pId = doc.getString("patientId") ?: ""
+                        val dId = doc.getString("doctorId") ?: ""
+                        val timestamp = doc.getTimestamp("timestamp", DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)?.toDate()
+                        
+                        MedicalNote(
+                            id = doc.id,
+                            patientId = pId,
+                            doctorId = dId,
+                            title = title,
+                            content = content,
+                            timestamp = timestamp
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing medical note ${doc.id}", e)
+                        null
+                    }
+                }?.sortedByDescending { it.timestamp?.time ?: Long.MAX_VALUE } ?: emptyList()
+                
+                trySend(Result.success(notes))
+            }
+        awaitClose { registration.remove() }
+    }
+
+    suspend fun addMedicalNote(note: MedicalNote): Result<Unit> {
+        return try {
+            // Ensure timestamp is null so @ServerTimestamp works correctly
+            val noteMap = mapOf(
+                "patientId" to note.patientId,
+                "doctorId" to note.doctorId,
+                "title" to note.title,
+                "content" to note.content,
+                "timestamp" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+            )
+            db.collection("medical_notes").add(noteMap).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding medical note", e)
+            Result.failure(e)
+        }
     }
 }

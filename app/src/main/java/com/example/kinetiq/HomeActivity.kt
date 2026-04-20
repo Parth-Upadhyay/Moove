@@ -7,9 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +41,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.kinetiq.models.*
 import com.example.kinetiq.ui.auth.AuthScreen
 import com.example.kinetiq.ui.components.GridCalendar
+import com.example.kinetiq.ui.components.MooveToast
 import com.example.kinetiq.ui.dashboard.*
 import com.example.kinetiq.ui.theme.*
 import com.example.kinetiq.viewmodel.*
@@ -82,12 +82,18 @@ class HomeActivity : AppCompatActivity() {
                 // Improved Back Button Handling
                 BackHandler(enabled = activeChatPartner != null || showRomAnalytics != null || selectedPatientId != null || showAchievements || showSettings) {
                     when {
-                        activeChatPartner != null -> activeChatPartner = null
+                        activeChatPartner != null -> {
+                            activeChatPartner = null
+                            if (currentUserRole == UserRole.DOCTOR) selectedTab = 1
+                        }
                         showRomAnalytics != null -> {
                             showRomAnalytics = null
-                            selectedTab = 1 // Take back to progress tab
+                            selectedTab = 1
                         }
-                        selectedPatientId != null -> selectedPatientId = null
+                        selectedPatientId != null -> {
+                            selectedPatientId = null
+                            if (currentUserRole == UserRole.DOCTOR) selectedTab = 1
+                        }
                         showAchievements -> showAchievements = false
                         showSettings -> showSettings = false
                     }
@@ -97,11 +103,9 @@ class HomeActivity : AppCompatActivity() {
                     val auth = FirebaseAuth.getInstance()
                     val db = FirebaseFirestore.getInstance()
                     
-                    // Trigger Mock Data Seed (Development Only)
                     launch {
                         try {
                             DataSeeder(db).seedMockData()
-                            Log.d("HomeActivity", "Mock data seeded successfully")
                         } catch (e: Exception) {
                             Log.e("HomeActivity", "Error seeding mock data", e)
                         }
@@ -110,7 +114,6 @@ class HomeActivity : AppCompatActivity() {
                     var user = auth.currentUser
                     if (user != null) {
                         try {
-                            // Reload user to get latest isEmailVerified status
                             user.reload().await()
                             user = auth.currentUser
                             
@@ -127,7 +130,6 @@ class HomeActivity : AppCompatActivity() {
                                 }
                             }
                         } catch (e: Exception) {
-                            Log.e("HomeActivity", "Error checking auth status", e)
                             auth.signOut()
                         }
                     }
@@ -151,101 +153,57 @@ class HomeActivity : AppCompatActivity() {
                     )
                 } else {
                     val settingsViewModel: SettingsViewModel = hiltViewModel()
-                    when (currentUserRole!!) {
-                        UserRole.DOCTOR -> {
+                    
+                    // Smooth Screen Transition Container
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        AnimatedContent(
+                            targetState = Triple(activeChatPartner, showRomAnalytics, selectedPatientId) to (showAchievements to showSettings),
+                            transitionSpec = {
+                                fadeIn() togetherWith fadeOut()
+                            },
+                            label = "MainNavigation"
+                        ) { (primaryNav, secondaryNav) ->
+                            val (chat, rom, patientId) = primaryNav
+                            val (achievements, settings) = secondaryNav
+
                             when {
-                                activeChatPartner != null -> {
-                                    ChatScreen(
-                                        otherUserId = activeChatPartner!!.first,
-                                        otherUserName = activeChatPartner!!.second,
-                                        onBack = { activeChatPartner = null }
-                                    )
-                                }
-                                showRomAnalytics != null -> {
-                                    RomDashboardScreen(
-                                        patientId = showRomAnalytics!!.first,
-                                        exerciseType = showRomAnalytics!!.second,
-                                        onBack = { 
-                                            showRomAnalytics = null 
-                                        }
-                                    )
-                                }
-                                selectedPatientId != null -> {
-                                    PatientDetailScreen(
-                                        patientId = selectedPatientId!!,
-                                        onBack = { selectedPatientId = null }
-                                    )
-                                }
+                                chat != null -> ChatScreen(otherUserId = chat.first, otherUserName = chat.second, onBack = { activeChatPartner = null })
+                                rom != null -> RomDashboardScreen(patientId = rom.first, exerciseType = rom.second, onBack = { showRomAnalytics = null })
+                                patientId != null -> PatientDetailScreen(patientId = patientId, onBack = { selectedPatientId = null })
+                                achievements -> AchievementsScreen(viewModel = hiltViewModel(), onBack = { showAchievements = false })
+                                settings -> SettingsScreen(viewModel = settingsViewModel, onBack = { showSettings = false })
                                 else -> {
-                                    DoctorDashboardContainer(
-                                        onLogout = {
-                                            FirebaseAuth.getInstance().signOut()
-                                            authViewModel.resetState()
-                                            currentUserRole = null
-                                        },
-                                        onPatientClick = { patientId ->
-                                            selectedPatientId = patientId
-                                        },
-                                        onChatWithPatient = { patientId, name ->
-                                            activeChatPartner = patientId to name
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                        UserRole.PATIENT -> {
-                            when {
-                                showAchievements -> {
-                                    AchievementsScreen(
-                                        viewModel = hiltViewModel<AchievementsViewModel>(),
-                                        onBack = { showAchievements = false }
-                                    )
-                                }
-                                showSettings -> {
-                                    SettingsScreen(
-                                        viewModel = settingsViewModel,
-                                        onBack = { showSettings = false }
-                                    )
-                                }
-                                activeChatPartner != null -> {
-                                    ChatScreen(
-                                        otherUserId = activeChatPartner!!.first,
-                                        otherUserName = activeChatPartner!!.second,
-                                        onBack = { activeChatPartner = null }
-                                    )
-                                }
-                                showRomAnalytics != null -> {
-                                    RomDashboardScreen(
-                                        patientId = showRomAnalytics!!.first,
-                                        exerciseType = showRomAnalytics!!.second,
-                                        onBack = { 
-                                            showRomAnalytics = null
-                                            selectedTab = 1
-                                        }
-                                    )
-                                }
-                                else -> {
-                                    PatientDashboard(
-                                        selectedTab = selectedTab,
-                                        onTabSelected = { selectedTab = it },
-                                        onLogout = {
-                                            FirebaseAuth.getInstance().signOut()
-                                            authViewModel.resetState()
-                                            currentUserRole = null
-                                        },
-                                        onChatWithDoctor = { doctorId, name ->
-                                            activeChatPartner = doctorId to name
-                                        },
-                                        onViewProgress = { exerciseType ->
-                                            val uid = FirebaseAuth.getInstance().currentUser?.uid
-                                            if (uid != null) {
-                                                showRomAnalytics = uid to exerciseType
-                                            }
-                                        },
-                                        onShowAchievements = { showAchievements = true },
-                                        onShowSettings = { showSettings = true },
-                                        settingsViewModel = settingsViewModel
-                                    )
+                                    if (currentUserRole == UserRole.DOCTOR) {
+                                        DoctorDashboardContainer(
+                                            selectedTab = selectedTab,
+                                            onTabSelected = { selectedTab = it },
+                                            onLogout = {
+                                                FirebaseAuth.getInstance().signOut()
+                                                authViewModel.resetState()
+                                                currentUserRole = null
+                                            },
+                                            onPatientClick = { selectedPatientId = it },
+                                            onChatWithPatient = { id, name -> activeChatPartner = id to name }
+                                        )
+                                    } else {
+                                        PatientDashboard(
+                                            selectedTab = selectedTab,
+                                            onTabSelected = { selectedTab = it },
+                                            onLogout = {
+                                                FirebaseAuth.getInstance().signOut()
+                                                authViewModel.resetState()
+                                                currentUserRole = null
+                                            },
+                                            onChatWithDoctor = { id, name -> activeChatPartner = id to name },
+                                            onViewProgress = { type -> 
+                                                val uid = FirebaseAuth.getInstance().currentUser?.uid
+                                                if (uid != null) showRomAnalytics = uid to type
+                                            },
+                                            onShowAchievements = { showAchievements = true },
+                                            onShowSettings = { showSettings = true },
+                                            settingsViewModel = settingsViewModel
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -299,7 +257,6 @@ class HomeActivity : AppCompatActivity() {
                 val doctorUserDoc = db.collection("users").document(docId).get().await()
                 assignedDoctorName = doctorUserDoc.getString("displayName")?.ifEmpty { "Doctor" } ?: "Doctor"
             }
-            analyticsViewModel.loadSessionsForDate(uid, selectedDate)
             analyticsViewModel.loadOverallSummary(uid)
             appointmentViewModel.loadAppointmentsForPatient()
         }
@@ -312,10 +269,9 @@ class HomeActivity : AppCompatActivity() {
             }
         }
 
-        // Show toast on success
         LaunchedEffect(connectionState.successMessage) {
             connectionState.successMessage?.let {
-                Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                MooveToast.show(context, it)
                 showRequestDialog = false
                 connectionViewModel.clearStatusMessages()
             }
@@ -323,13 +279,12 @@ class HomeActivity : AppCompatActivity() {
 
         LaunchedEffect(appointmentState.successMessage) {
             appointmentState.successMessage?.let {
-                Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                MooveToast.show(context, it)
                 showAppointmentDialog = false
                 appointmentViewModel.clearMessages()
             }
         }
 
-        // Dashboard level back handler: Reset to first tab
         BackHandler(enabled = selectedTab != 0) {
             onTabSelected(0)
         }
@@ -358,260 +313,175 @@ class HomeActivity : AppCompatActivity() {
                 )
             },
             bottomBar = {
-                NavigationBar(
-                    containerColor = MooveSurface,
-                    tonalElevation = 8.dp
-                ) {
-                    NavigationBarItem(
-                        selected = selectedTab == 0,
-                        onClick = { onTabSelected(0) },
-                        icon = { Icon(Icons.Default.Home, null) },
-                        label = { Text("Home") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MoovePrimary,
-                            selectedTextColor = MoovePrimary,
-                            indicatorColor = MooveSurfaceVariant
+                NavigationBar(containerColor = MooveSurface, tonalElevation = 8.dp) {
+                    val tabs = listOf("Home" to Icons.Default.Home, "Progress" to Icons.Default.Search, "Calendar" to Icons.Default.DateRange)
+                    tabs.forEachIndexed { index, (label, icon) ->
+                        NavigationBarItem(
+                            selected = selectedTab == index,
+                            onClick = { onTabSelected(index) },
+                            icon = { Icon(icon, null) },
+                            label = { Text(label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MoovePrimary,
+                                selectedTextColor = MoovePrimary,
+                                indicatorColor = MooveSurfaceVariant
+                            )
                         )
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { onTabSelected(1) },
-                        icon = { Icon(Icons.Default.Search, null) },
-                        label = { Text("Progress") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MoovePrimary,
-                            selectedTextColor = MoovePrimary,
-                            indicatorColor = MooveSurfaceVariant
-                        )
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 2,
-                        onClick = { onTabSelected(2) },
-                        icon = { Icon(Icons.Default.DateRange, null) },
-                        label = { Text("Calendar") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MoovePrimary,
-                            selectedTextColor = MoovePrimary,
-                            indicatorColor = MooveSurfaceVariant
-                        )
-                    )
+                    }
                 }
             },
             containerColor = MooveBackground
         ) { padding ->
             Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-                when (selectedTab) {
-                    0 -> PatientHomeContent(
-                        assignedDoctorId = assignedDoctorId,
-                        assignedDoctorName = assignedDoctorName,
-                        onChatWithDoctor = onChatWithDoctor,
-                        onConnectClick = { showRequestDialog = true },
-                        patientData = patientData,
-                        isVoiceEnabled = settingsState.notificationSettings.isVoiceFeedbackEnabled
-                    )
-                    1 -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-                        item {
-                            Spacer(Modifier.height(16.dp))
-                            Text("Your Recovery Journey", style = MaterialTheme.typography.headlineSmall, color = MooveOnBackground, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(24.dp))
-                            
-                            MooveCard(modifier = Modifier.fillMaxWidth()) {
-                                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Recovery Status", style = MaterialTheme.typography.titleMedium, color = MooveOnSurfaceVariant)
-                                    Spacer(Modifier.height(12.dp))
-                                    Text(
-                                        "${analyticsState.overallSummary.weightedRecoveryPercentage.toInt()}%",
-                                        style = MaterialTheme.typography.displayMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MoovePrimary
-                                    )
-                                    Text("Overall Weighted Progress", style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
-                                    
-                                    Spacer(Modifier.height(24.dp))
-                                    HorizontalDivider(color = MooveSurfaceVariant)
-                                    Spacer(Modifier.height(24.dp))
-                                    
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("${analyticsState.overallSummary.avgOptimalityImprovement.toInt()}%", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
-                                            Text("ROM Imp.", style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
-                                        }
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("-${analyticsState.overallSummary.avgPainReduction.toInt()} pts", style = MaterialTheme.typography.titleMedium, color = Color(0xFFE57373), fontWeight = FontWeight.Bold)
-                                            Text("Pain Red.", style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
-                                        }
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("${analyticsState.overallSummary.totalSessions}", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
-                                            Text("Sessions", style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            Spacer(Modifier.height(32.dp))
-                            Text("Exercise Details", style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
-                            Text("Select an exercise to view detailed trends.", style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
-                            Spacer(Modifier.height(20.dp))
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        if (targetState > initialState) {
+                            (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it } + fadeOut())
+                        } else {
+                            (slideInHorizontally { -it } + fadeIn()) togetherWith (slideOutHorizontally { it } + fadeOut())
                         }
-                        
-                        val exercises = listOf(
-                            ExerciseItem("Pendulum", "pendulum", Icons.Default.Refresh),
-                            ExerciseItem("Wall Climb", "wall_climb", Icons.Default.KeyboardArrowUp),
-                            ExerciseItem("External Rotation", "external_rotation", Icons.Default.PlayArrow),
-                            ExerciseItem("Crossover", "crossover", Icons.Default.Close),
-                            ExerciseItem("Lateral Arm Raise", "lateral_arm_raise", Icons.Default.Add),
-                            ExerciseItem("Forward Arm Raise", "forward_arm_raise", Icons.AutoMirrored.Filled.KeyboardArrowRight),
-                            ExerciseItem("Hitchhiker", "hitchhiker", Icons.Default.ThumbUp)
+                    },
+                    label = "TabTransition"
+                ) { targetTab ->
+                    when (targetTab) {
+                        0 -> PatientHomeContent(
+                            assignedDoctorId = assignedDoctorId,
+                            assignedDoctorName = assignedDoctorName,
+                            onChatWithDoctor = onChatWithDoctor,
+                            onConnectClick = { showRequestDialog = true },
+                            patientData = patientData,
+                            isVoiceEnabled = settingsState.notificationSettings.isVoiceFeedbackEnabled
                         )
+                        1 -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+                            item {
+                                Spacer(Modifier.height(16.dp))
+                                Text("Your Recovery Journey", style = MaterialTheme.typography.headlineSmall, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(24.dp))
+                                
+                                MooveCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Recovery Status", style = MaterialTheme.typography.titleMedium, color = MooveOnSurfaceVariant)
+                                        Spacer(Modifier.height(12.dp))
+                                        Text(
+                                            "${analyticsState.overallSummary.weightedRecoveryPercentage.toInt()}%",
+                                            style = MaterialTheme.typography.displayMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MoovePrimary
+                                        )
+                                        Text("Overall Weighted Progress", style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
+                                        
+                                        Spacer(Modifier.height(24.dp))
+                                        HorizontalDivider(color = MooveSurfaceVariant)
+                                        Spacer(Modifier.height(24.dp))
+                                        
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                            StatItem("${analyticsState.overallSummary.avgOptimalityImprovement.toInt()}%", "ROM Imp.", MooveOnBackground)
+                                            StatItem("-${analyticsState.overallSummary.avgPainReduction.toInt()} pts", "Pain Red.", Color(0xFFE57373))
+                                            StatItem("${analyticsState.overallSummary.totalSessions}", "Sessions", MooveOnBackground)
+                                        }
+                                    }
+                                }
+                                
+                                Spacer(Modifier.height(32.dp))
+                                Text("Exercise Details", style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                                Text("Select an exercise to view detailed trends.", style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
+                                Spacer(Modifier.height(20.dp))
+                            }
+                            
+                            item {
+                                val exercises = listOf(
+                                    ExerciseItem("Pendulum", "pendulum", Icons.Default.Refresh),
+                                    ExerciseItem("Wall Climb", "wall_climb", Icons.Default.KeyboardArrowUp),
+                                    ExerciseItem("External Rotation", "external_rotation", Icons.Default.PlayArrow),
+                                    ExerciseItem("Crossover", "crossover", Icons.Default.Close),
+                                    ExerciseItem("Lateral Arm Raise", "lateral_arm_raise", Icons.Default.Add),
+                                    ExerciseItem("Forward Arm Raise", "forward_arm_raise", Icons.AutoMirrored.Filled.KeyboardArrowRight),
+                                    ExerciseItem("Hitchhiker", "hitchhiker", Icons.Default.ThumbUp)
+                                )
 
-                        item {
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(2),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                                modifier = Modifier.height(650.dp) 
-                            ) {
-                                items(exercises) { exercise ->
-                                    ExerciseCard(exercise) {
-                                        onViewProgress(exercise.id)
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(2),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                    modifier = Modifier.height(750.dp) // Increased height to accommodate taller cards
+                                ) {
+                                    items(exercises) { exercise ->
+                                        ExerciseCard(exercise) { onViewProgress(exercise.id) }
                                     }
                                 }
                             }
                         }
-                    }
-                    2 -> {
-                        var appointmentsExpanded by remember { mutableStateOf(false) }
-                        var sessionsExpanded by remember { mutableStateOf(false) }
-                        
-                        LazyColumn(Modifier.fillMaxSize()) {
-                            item {
-                                GridCalendar(
-                                    selectedDate = selectedDate, 
-                                    onDateSelected = { selectedDate = it },
-                                    modifier = Modifier.padding(16.dp)
-                                )
-                            }
+                        2 -> {
+                            var appointmentsExpanded by remember { mutableStateOf(true) }
+                            var sessionsExpanded by remember { mutableStateOf(false) }
                             
-                            item {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { appointmentsExpanded = !appointmentsExpanded }
-                                        .padding(horizontal = 24.dp, vertical = 12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            "Appointments",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MooveOnBackground,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Icon(
-                                            if (appointmentsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                            contentDescription = null,
-                                            modifier = Modifier.padding(start = 8.dp).size(20.dp),
-                                            tint = MooveOnSurfaceVariant
-                                        )
-                                    }
-                                    if (assignedDoctorId != null) {
-                                        TextButton(onClick = { 
-                                            appointmentViewModel.loadBookedSlots(assignedDoctorId!!, selectedDate)
-                                            showAppointmentDialog = true 
-                                        }) {
-                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = MoovePrimary)
-                                            Spacer(Modifier.width(4.dp))
-                                            Text("Request", color = MoovePrimary, fontWeight = FontWeight.SemiBold)
-                                        }
-                                    }
-                                }
-                            }
-
-                            item {
-                                AnimatedVisibility(
-                                    visible = appointmentsExpanded,
-                                    enter = expandVertically(),
-                                    exit = shrinkVertically()
-                                ) {
-                                    val dailyAppointments = appointmentState.appointments.filter { 
-                                        val cal1 = Calendar.getInstance().apply { time = it.date }
-                                        val cal2 = Calendar.getInstance().apply { time = selectedDate }
-                                        cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
-                                        cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
-                                    }
-
-                                    Column(modifier = Modifier.padding(horizontal = 24.dp)) {
-                                        if (dailyAppointments.isEmpty()) {
-                                            Text(
-                                                "No appointments scheduled for this day.",
-                                                modifier = Modifier.padding(vertical = 16.dp),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MooveOnSurfaceVariant
-                                            )
-                                        } else {
-                                            dailyAppointments.forEach { appt ->
-                                                AppointmentCard(appt)
-                                                Spacer(Modifier.height(12.dp))
-                                            }
-                                        }
-                                        Spacer(Modifier.height(8.dp))
-                                    }
-                                }
-                            }
-
-                            item {
-                                HorizontalDivider(color = MooveSurface, thickness = 8.dp)
-                            }
-
-                            item {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { sessionsExpanded = !sessionsExpanded }
-                                        .padding(horizontal = 24.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        "Sessions for ${java.text.SimpleDateFormat("MMM dd").format(selectedDate)}",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MooveOnBackground,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                    Icon(
-                                        if (sessionsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                        contentDescription = null,
-                                        modifier = Modifier.padding(start = 8.dp).size(20.dp),
-                                        tint = MooveOnSurfaceVariant
+                            LazyColumn(Modifier.fillMaxSize()) {
+                                item {
+                                    GridCalendar(
+                                        selectedDate = selectedDate, 
+                                        onDateSelected = { selectedDate = it },
+                                        modifier = Modifier.padding(16.dp)
                                     )
                                 }
-                            }
-                            
-                            item {
-                                AnimatedVisibility(
-                                    visible = sessionsExpanded,
-                                    enter = expandVertically(),
-                                    exit = shrinkVertically()
-                                ) {
-                                    Column(modifier = Modifier.padding(horizontal = 24.dp)) {
-                                        if (analyticsState.isLoading) {
-                                            Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
-                                                CircularProgressIndicator(color = MoovePrimary)
-                                            }
-                                        } else if (analyticsState.dailySessions.isEmpty()) {
-                                            Text(
-                                                "No sessions recorded for this day.",
-                                                modifier = Modifier.padding(vertical = 16.dp),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MooveOnSurfaceVariant
-                                            )
-                                        } else {
-                                            analyticsState.dailySessions.forEach { session ->
-                                                SessionHistoryCard(session)
-                                                Spacer(Modifier.height(12.dp))
+                                
+                                item {
+                                    ExpandableSectionHeader("Appointments", appointmentsExpanded, { appointmentsExpanded = it }) {
+                                        if (assignedDoctorId != null) {
+                                            TextButton(onClick = { 
+                                                appointmentViewModel.loadBookedSlots(assignedDoctorId!!, selectedDate)
+                                                showAppointmentDialog = true 
+                                            }) {
+                                                Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MoovePrimary)
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("Request", color = MoovePrimary, fontWeight = FontWeight.SemiBold)
                                             }
                                         }
-                                        Spacer(Modifier.height(24.dp))
+                                    }
+                                }
+
+                                item {
+                                    AnimatedVisibility(visible = appointmentsExpanded, enter = expandVertically(), exit = shrinkVertically()) {
+                                        val dailyAppointments = appointmentState.appointments.filter { 
+                                            isSameDay(it.date, selectedDate)
+                                        }
+                                        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+                                            if (dailyAppointments.isEmpty()) {
+                                                EmptyStateMessage("No appointments scheduled for this day.")
+                                            } else {
+                                                dailyAppointments.forEach { appt ->
+                                                    AppointmentCard(appt)
+                                                    Spacer(Modifier.height(12.dp))
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                        }
+                                    }
+                                }
+
+                                item { HorizontalDivider(color = MooveSurface, thickness = 8.dp) }
+
+                                item {
+                                    ExpandableSectionHeader("Sessions for ${java.text.SimpleDateFormat("MMM dd").format(selectedDate)}", sessionsExpanded, { sessionsExpanded = it })
+                                }
+                                
+                                item {
+                                    AnimatedVisibility(visible = sessionsExpanded, enter = expandVertically(), exit = shrinkVertically()) {
+                                        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+                                            if (analyticsState.isLoading) {
+                                                Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                                                    CircularProgressIndicator(color = MoovePrimary)
+                                                }
+                                            } else if (analyticsState.dailySessions.isEmpty()) {
+                                                EmptyStateMessage("No sessions recorded for this day.")
+                                            } else {
+                                                analyticsState.dailySessions.forEach { session ->
+                                                    SessionHistoryCard(session)
+                                                    Spacer(Modifier.height(12.dp))
+                                                }
+                                            }
+                                            Spacer(Modifier.height(24.dp))
+                                        }
                                     }
                                 }
                             }
@@ -623,47 +493,22 @@ class HomeActivity : AppCompatActivity() {
 
         if (showRequestDialog) {
             AlertDialog(
-                onDismissRequest = { 
-                    showRequestDialog = false 
-                    connectionViewModel.clearStatusMessages()
-                },
+                onDismissRequest = { showRequestDialog = false; connectionViewModel.clearStatusMessages() },
                 containerColor = MooveBackground,
                 shape = RoundedCornerShape(24.dp),
-                title = { Text("Connect to Doctor", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MooveOnBackground) },
+                title = { Text("Connect to Doctor", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
-                        Text("Ask your doctor for their registered Moove email.", style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
+                        Text("Ask your doctor for their registered Moove email.", color = MooveOnSurfaceVariant)
                         Spacer(Modifier.height(20.dp))
-                        MooveTextField(
-                            value = doctorEmail,
-                            onValueChange = { doctorEmail = it },
-                            label = "Doctor's Email",
-                            placeholder = "doctor@moove.com"
-                        )
-                        connectionState.error?.let { 
-                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)) 
-                        }
+                        MooveTextField(value = doctorEmail, onValueChange = { doctorEmail = it }, label = "Doctor's Email")
+                        connectionState.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     }
                 },
                 confirmButton = {
-                    MoovePrimaryButton(
-                        onClick = { connectionViewModel.sendRequest(doctorEmail) },
-                        enabled = doctorEmail.isNotBlank() && !connectionState.isLoading,
-                        modifier = Modifier.height(48.dp)
-                    ) {
-                        if (connectionState.isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MooveOnPrimary)
-                        } else {
-                            Text("Send Request", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { 
-                        showRequestDialog = false 
-                        connectionViewModel.clearStatusMessages()
-                    }) {
-                        Text("Cancel", color = MooveOnSurfaceVariant, fontWeight = FontWeight.Medium)
+                    MoovePrimaryButton(onClick = { connectionViewModel.sendRequest(doctorEmail) }, enabled = doctorEmail.isNotBlank() && !connectionState.isLoading) {
+                        if (connectionState.isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MooveOnPrimary)
+                        else Text("Send Request")
                     }
                 }
             )
@@ -676,90 +521,73 @@ class HomeActivity : AppCompatActivity() {
             val availableSlots = timeSlots.filter { it !in appointmentState.bookedSlots }
 
             AlertDialog(
-                onDismissRequest = { 
-                    showAppointmentDialog = false 
-                    appointmentViewModel.clearMessages()
-                },
+                onDismissRequest = { showAppointmentDialog = false; appointmentViewModel.clearMessages() },
                 containerColor = MooveBackground,
                 shape = RoundedCornerShape(24.dp),
-                title = { Text("Request Appointment", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MooveOnBackground) },
+                title = { Text("Request Appointment", fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
-                        Text("Request for ${java.text.SimpleDateFormat("MMM dd").format(selectedDate)} with $assignedDoctorName", style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
+                        Text("For ${java.text.SimpleDateFormat("MMM dd").format(selectedDate)} with $assignedDoctorName", color = MooveOnSurfaceVariant)
                         Spacer(Modifier.height(20.dp))
-                        
                         if (availableSlots.isEmpty()) {
-                            Text("No slots available for this day. Please choose another date.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            Text("No slots available.", color = MaterialTheme.colorScheme.error)
                         } else {
-                            Text("Select Time Slot", style = MaterialTheme.typography.labelLarge, color = MooveOnBackground, fontWeight = FontWeight.SemiBold)
+                            Text("Select Time Slot", fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.height(12.dp))
-                            
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(3),
-                                modifier = Modifier.height(140.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
+                            LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.height(140.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(availableSlots) { slot ->
                                     val isSelected = selectedTimeSlot == slot
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(if (isSelected) MoovePrimary else MooveSurfaceVariant)
-                                            .clickable { selectedTimeSlot = slot }
-                                            .padding(vertical = 10.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            slot,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (isSelected) MooveOnPrimary else MooveOnBackground,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                        )
+                                    Box(modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(if (isSelected) MoovePrimary else MooveSurfaceVariant).clickable { selectedTimeSlot = slot }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                                        Text(slot, color = if (isSelected) MooveOnPrimary else MooveOnBackground)
                                     }
                                 }
                             }
                         }
-
                         Spacer(Modifier.height(20.dp))
-                        MooveTextField(
-                            value = note,
-                            onValueChange = { note = it },
-                            label = "Note (Optional)",
-                            placeholder = "Reason for visit..."
-                        )
-                        appointmentState.error?.let {
-                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
-                        }
+                        MooveTextField(value = note, onValueChange = { note = it }, label = "Note (Optional)")
                     }
                 },
                 confirmButton = {
-                    MoovePrimaryButton(
-                        onClick = {
-                            if (selectedTimeSlot != null) {
-                                appointmentViewModel.requestAppointment(assignedDoctorId!!, assignedDoctorName, selectedDate, selectedTimeSlot!!, note)
-                            }
-                        }, 
-                        enabled = !appointmentState.isLoading && selectedTimeSlot != null,
-                        modifier = Modifier.height(48.dp)
-                    ) {
-                        if (appointmentState.isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MooveOnPrimary)
-                        } else {
-                            Text("Send Request", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { 
-                        showAppointmentDialog = false 
-                        appointmentViewModel.clearMessages()
-                    }) {
-                        Text("Cancel", color = MooveOnSurfaceVariant, fontWeight = FontWeight.Medium)
+                    MoovePrimaryButton(onClick = { if (selectedTimeSlot != null) appointmentViewModel.requestAppointment(assignedDoctorId!!, assignedDoctorName, selectedDate, selectedTimeSlot!!, note) }, enabled = !appointmentState.isLoading && selectedTimeSlot != null) {
+                        Text("Send Request")
                     }
                 }
             )
         }
+    }
+
+    @Composable
+    private fun StatItem(value: String, label: String, color: Color) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, style = MaterialTheme.typography.titleMedium, color = color, fontWeight = FontWeight.Bold)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
+        }
+    }
+
+    @Composable
+    private fun ExpandableSectionHeader(title: String, expanded: Boolean, onToggle: (Boolean) -> Unit, actions: @Composable () -> Unit = {}) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { onToggle(!expanded) }.padding(horizontal = 24.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                Icon(if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null, modifier = Modifier.padding(start = 8.dp).size(20.dp), tint = MooveOnSurfaceVariant)
+            }
+            actions()
+        }
+    }
+
+    @Composable
+    private fun EmptyStateMessage(message: String) {
+        Text(message, modifier = Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
+    }
+
+    private fun isSameDay(d1: Date, d2: Date): Boolean {
+        val cal1 = Calendar.getInstance().apply { time = d1 }
+        val cal2 = Calendar.getInstance().apply { time = d2 }
+        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) && cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
     }
 
     @Composable
@@ -780,35 +608,16 @@ class HomeActivity : AppCompatActivity() {
             Column {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                     Column {
-                        Text(
-                            if (isDoctorView) appointment.patientName else "Dr. ${appointment.doctorName}",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MooveOnBackground
-                        )
+                        Text(if (isDoctorView) appointment.patientName else "Dr. ${appointment.doctorName}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(14.dp), tint = MoovePrimary)
+                            Icon(Icons.Default.Notifications, null, modifier = Modifier.size(14.dp), tint = MoovePrimary)
                             Spacer(Modifier.width(4.dp))
-                            Text(
-                                appointment.timeSlot,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MoovePrimary,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Text(appointment.timeSlot, color = MoovePrimary, fontWeight = FontWeight.Medium)
                         }
                     }
-                    Surface(
-                        color = statusColor.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(
-                            appointment.status.name,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = statusColor,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            fontWeight = FontWeight.Bold
-                        )
+                    Surface(color = statusColor.copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
+                        Text(appointment.status.name, style = MaterialTheme.typography.labelSmall, color = statusColor, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), fontWeight = FontWeight.Bold)
                     }
                 }
                 if (appointment.note.isNotBlank()) {
@@ -819,17 +628,8 @@ class HomeActivity : AppCompatActivity() {
                 if (showActions && appointment.status == AppointmentStatus.PENDING) {
                     Spacer(Modifier.height(16.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { onStatusUpdate(AppointmentStatus.REJECTED) }) {
-                            Text("Reject", color = Color(0xFFE57373), fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Button(
-                            onClick = { onStatusUpdate(AppointmentStatus.ACCEPTED) },
-                            colors = ButtonDefaults.buttonColors(containerColor = MoovePrimary),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Accept", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                        }
+                        TextButton(onClick = { onStatusUpdate(AppointmentStatus.REJECTED) }) { Text("Reject", color = Color(0xFFE57373)) }
+                        Button(onClick = { onStatusUpdate(AppointmentStatus.ACCEPTED) }, colors = ButtonDefaults.buttonColors(containerColor = MoovePrimary)) { Text("Accept") }
                     }
                 }
             }
@@ -841,52 +641,15 @@ class HomeActivity : AppCompatActivity() {
         MooveCard(modifier = Modifier.fillMaxWidth()) {
             Column {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        session.exercise.replace("_", " ").replaceFirstChar { it.uppercase() },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MooveOnBackground,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        "${session.results.peak_rom_degrees.toInt()}°",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MoovePrimary,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(session.exercise.replace("_", " ").replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${session.results.peak_rom_degrees.toInt()}°", style = MaterialTheme.typography.titleMedium, color = MoovePrimary, fontWeight = FontWeight.Bold)
                 }
-                
                 Spacer(Modifier.height(12.dp))
-                
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp), tint = MooveOnSurfaceVariant)
+                    Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp), tint = MooveOnSurfaceVariant)
                     Spacer(Modifier.width(6.6.dp))
-                    val avgPain = if (session.pain_log.isNotEmpty()) {
-                        session.pain_log.mapNotNull { it.level.toDoubleOrNull() }.average()
-                    } else session.pre_session.pain_score.toDouble()
-                    
-                    Text("Avg Pain Score: ${String.format("%.1f", avgPain)}", style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant)
-                }
-
-                if (session.form_flags.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    session.form_flags.take(2).forEach { flag ->
-                        Surface(
-                            color = Color(0xFFE57373).copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.padding(top = 4.dp)
-                        ) {
-                            Text(
-                                "• ${flag.flag}", 
-                                style = MaterialTheme.typography.labelSmall, 
-                                color = Color(0xFFE57373),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
+                    val avgPain = if (session.pain_log.isNotEmpty()) session.pain_log.mapNotNull { it.level.toDoubleOrNull() }.average() else session.pre_session.pain_score.toDouble()
+                    Text("Avg Pain Score: ${String.format("%.1f", avgPain)}", color = MooveOnSurfaceVariant)
                 }
             }
         }
@@ -907,17 +670,8 @@ class HomeActivity : AppCompatActivity() {
         LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
                 Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
-                    Text(
-                        "Welcome Back!",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MooveOnBackground,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        if (prescribedExercises.isEmpty()) "Select an exercise to begin your session." else "Complete your prescribed exercises for today.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MooveOnSurfaceVariant
-                    )
+                    Text("Welcome Back!", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text(if (prescribedExercises.isEmpty()) "Select an exercise to begin." else "Complete today's exercises.", color = MooveOnSurfaceVariant)
                     Spacer(Modifier.height(24.dp))
                 }
             }
@@ -933,18 +687,9 @@ class HomeActivity : AppCompatActivity() {
                     ExerciseItem("Hitchhiker", "hitchhiker", Icons.Default.ThumbUp)
                 )
 
-                val displayExercises = if (prescribedExercises.isEmpty()) {
-                    availableExercises
-                } else {
-                    availableExercises.filter { avail -> prescribedExercises.any { it.exerciseId == avail.id } }
-                }
+                val displayExercises = if (prescribedExercises.isEmpty()) availableExercises else availableExercises.filter { avail -> prescribedExercises.any { it.exerciseId == avail.id } }
 
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.height(if (displayExercises.size > 4) 650.dp else 320.dp).padding(horizontal = 24.dp)
-                ) {
+                LazyVerticalGrid(columns = GridCells.Fixed(2), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.height(if (displayExercises.size > 4) 750.dp else 380.dp).padding(horizontal = 24.dp)) {
                     items(displayExercises) { exercise ->
                         val prescription = prescribedExercises.find { it.exerciseId == exercise.id }
                         ExerciseCard(exercise, prescription) {
@@ -952,10 +697,7 @@ class HomeActivity : AppCompatActivity() {
                                 putExtra("EXERCISE_TYPE", exercise.id)
                                 putExtra("SELECTED_SIDE", "right")
                                 putExtra("VOICE_FEEDBACK_ENABLED", isVoiceEnabled)
-                                prescription?.let {
-                                    putExtra("TARGET_SETS", it.sets)
-                                    putExtra("TARGET_REPS", it.reps)
-                                }
+                                prescription?.let { putExtra("TARGET_SETS", it.sets); putExtra("TARGET_REPS", it.reps) }
                             }
                             context.startActivity(intent)
                         }
@@ -966,27 +708,17 @@ class HomeActivity : AppCompatActivity() {
             item {
                 Column(modifier = Modifier.padding(24.dp)) {
                     if (assignedDoctorId != null) {
-                        MoovePrimaryButton(
-                            onClick = { onChatWithDoctor(assignedDoctorId, assignedDoctorName) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(20.dp), tint = MooveOnPrimary)
+                        MoovePrimaryButton(onClick = { onChatWithDoctor(assignedDoctorId, assignedDoctorName) }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Email, null, modifier = Modifier.size(20.dp), tint = MooveOnPrimary)
                             Spacer(Modifier.width(12.dp))
-                            Text("Chat with $assignedDoctorName", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Chat with $assignedDoctorName", fontWeight = FontWeight.Bold)
                         }
                         Spacer(Modifier.height(16.dp))
                     }
-
-                    OutlinedButton(
-                        onClick = onConnectClick,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MoovePrimary),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MoovePrimary)
-                    ) {
-                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(20.dp), tint = MoovePrimary)
+                    OutlinedButton(onClick = onConnectClick, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, MoovePrimary)) {
+                        Icon(Icons.Default.Person, null, modifier = Modifier.size(20.dp), tint = MoovePrimary)
                         Spacer(Modifier.width(12.dp))
-                        Text(if (assignedDoctorId == null) "Connect to Doctor" else "Change Doctor", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(if (assignedDoctorId == null) "Connect to Doctor" else "Change Doctor", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -995,49 +727,16 @@ class HomeActivity : AppCompatActivity() {
 
     @Composable
     fun ExerciseCard(exercise: ExerciseItem, prescription: PrescribedExercise? = null, onClick: () -> Unit) {
-        MooveCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clickable(onClick = onClick)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Surface(
-                    color = MooveBackground,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.size(56.dp).border(1.dp, CardBorder, RoundedCornerShape(12.dp))
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            exercise.icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                            tint = MoovePrimary
-                        )
-                    }
+        MooveCard(modifier = Modifier.fillMaxWidth().height(180.dp).clickable(onClick = onClick)) {
+            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Surface(color = MooveBackground, shape = RoundedCornerShape(12.dp), modifier = Modifier.size(56.dp).border(1.dp, CardBorder, RoundedCornerShape(12.dp))) {
+                    Box(contentAlignment = Alignment.Center) { Icon(exercise.icon, null, modifier = Modifier.size(28.dp), tint = MoovePrimary) }
                 }
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    exercise.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MooveOnBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center
-                )
+                Spacer(Modifier.height(12.dp))
+                Text(exercise.name, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (prescription != null) {
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        "${prescription.sets} sets • ${prescription.reps} reps",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MooveOnSurfaceVariant,
-                        maxLines = 1
-                    )
+                    Text("${prescription.sets} sets • ${prescription.reps} reps", style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
                 }
             }
         }
@@ -1052,124 +751,62 @@ class HomeActivity : AppCompatActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeActivity.DoctorDashboardContainer(
+    selectedTab: Int,
+    onTabSelected: (Int) -> Unit,
     onLogout: () -> Unit, 
     onPatientClick: (String) -> Unit,
     onChatWithPatient: (String, String) -> Unit
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
     var selectedDate by remember { mutableStateOf(Date()) }
-    
     val appointmentViewModel: AppointmentViewModel = hiltViewModel()
     val appointmentState by appointmentViewModel.uiState.collectAsState()
 
-    LaunchedEffect(Unit) {
-        appointmentViewModel.loadAppointmentsForDoctor()
-    }
+    LaunchedEffect(Unit) { appointmentViewModel.loadAppointmentsForDoctor() }
 
-    BackHandler(enabled = selectedTab != 0) {
-        selectedTab = 0
-    }
+    BackHandler(enabled = selectedTab != 0) { onTabSelected(0) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Provider Dashboard", fontWeight = FontWeight.Bold, color = MooveOnBackground) },
+                title = { Text("Provider Dashboard", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MooveBackground),
-                actions = {
-                    IconButton(onClick = onLogout) {
-                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout", tint = Color(0xFFE57373))
-                    }
-                }
+                actions = { IconButton(onClick = onLogout) { Icon(Icons.AutoMirrored.Filled.ExitToApp, null, tint = Color(0xFFE57373)) } }
             )
         },
         bottomBar = {
             NavigationBar(containerColor = MooveSurface) {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.Notifications, null) },
-                    label = { Text("Alerts") },
-                    colors = NavigationBarItemDefaults.colors(selectedIconColor = MoovePrimary, indicatorColor = MooveSurfaceVariant, selectedTextColor = MoovePrimary)
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.AutoMirrored.Filled.List, null) },
-                    label = { Text("Patients") },
-                    colors = NavigationBarItemDefaults.colors(selectedIconColor = MoovePrimary, indicatorColor = MooveSurfaceVariant, selectedTextColor = MoovePrimary)
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Email, null) },
-                    label = { Text("Requests") },
-                    colors = NavigationBarItemDefaults.colors(selectedIconColor = MoovePrimary, indicatorColor = MooveSurfaceVariant, selectedTextColor = MoovePrimary)
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
-                    icon = { Icon(Icons.Default.DateRange, null) },
-                    label = { Text("Schedule") },
-                    colors = NavigationBarItemDefaults.colors(selectedIconColor = MoovePrimary, indicatorColor = MooveSurfaceVariant, selectedTextColor = MoovePrimary)
-                )
+                val tabs = listOf("Alerts" to Icons.Default.Notifications, "Patients" to Icons.AutoMirrored.Filled.List, "Requests" to Icons.Default.Email, "Schedule" to Icons.Default.DateRange)
+                tabs.forEachIndexed { index, (label, icon) ->
+                    NavigationBarItem(selected = selectedTab == index, onClick = { onTabSelected(index) }, icon = { Icon(icon, null) }, label = { Text(label) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MoovePrimary, indicatorColor = MooveSurfaceVariant, selectedTextColor = MoovePrimary))
+                }
             }
         },
         containerColor = MooveBackground
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            when (selectedTab) {
-                0 -> AlertTriageScreen(hiltViewModel<DoctorDashboardViewModel>(), onPatientClick)
-                1 -> PatientListScreen(
-                    viewModel = hiltViewModel<DoctorDashboardViewModel>(), 
-                    onPatientClick = onPatientClick,
-                    onChatClick = onChatWithPatient
-                )
-                2 -> RequestsScreen(hiltViewModel<ConnectionViewModel>())
-                3 -> Column(Modifier.fillMaxSize()) {
-                    GridCalendar(selectedDate = selectedDate, onDateSelected = { selectedDate = it }, modifier = Modifier.padding(16.dp))
-                    
-                    var subTab by remember { mutableIntStateOf(0) }
-                    TabRow(
-                        selectedTabIndex = subTab,
-                        containerColor = MooveSurface,
-                        contentColor = MoovePrimary,
-                        indicator = { tabPositions ->
-                            if (subTab < tabPositions.size) {
-                                TabRowDefaults.SecondaryIndicator(
-                                    Modifier.tabIndicatorOffset(tabPositions[subTab]),
-                                    color = MoovePrimary
-                                )
-                            }
+            AnimatedContent(targetState = selectedTab, label = "DoctorTabTransition") { targetTab ->
+                when (targetTab) {
+                    0 -> AlertTriageScreen(hiltViewModel(), onPatientClick)
+                    1 -> PatientListScreen(viewModel = hiltViewModel(), onPatientClick = onPatientClick, onChatClick = onChatWithPatient)
+                    2 -> RequestsScreen(hiltViewModel())
+                    3 -> Column(Modifier.fillMaxSize()) {
+                        GridCalendar(selectedDate = selectedDate, onDateSelected = { selectedDate = it }, modifier = Modifier.padding(16.dp))
+                        var subTab by remember { mutableIntStateOf(0) }
+                        TabRow(selectedTabIndex = subTab, containerColor = MooveSurface, contentColor = MoovePrimary) {
+                            Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("Scheduled") })
+                            Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("Pending") })
                         }
-                    ) {
-                        Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("Scheduled", style = MaterialTheme.typography.labelLarge, color = if (subTab == 0) MoovePrimary else MooveOnSurfaceVariant) })
-                        Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("Pending", style = MaterialTheme.typography.labelLarge, color = if (subTab == 1) MoovePrimary else MooveOnSurfaceVariant) })
-                    }
-
-                    val filteredAppointments = appointmentState.appointments.filter {
-                        val cal1 = Calendar.getInstance().apply { time = it.date }
-                        val cal2 = Calendar.getInstance().apply { time = selectedDate }
-                        val isSameDay = cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
-                                cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
-                        
-                        isSameDay && if (subTab == 0) it.status == AppointmentStatus.ACCEPTED else it.status == AppointmentStatus.PENDING
-                    }
-
-                    if (filteredAppointments.isEmpty()) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No ${if (subTab == 0) "scheduled appointments" else "pending requests"} for this day.", color = MooveOnSurfaceVariant)
+                        val filteredAppointments = appointmentState.appointments.filter { appt ->
+                            isSameDay(appt.date, selectedDate) && if (subTab == 0) appt.status == AppointmentStatus.ACCEPTED else appt.status == AppointmentStatus.PENDING
                         }
-                    } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                            items(filteredAppointments) { appt ->
-                                AppointmentCard(
-                                    appointment = appt, 
-                                    isDoctorView = true,
-                                    showActions = subTab == 1
-                                ) { newStatus ->
-                                    appointmentViewModel.updateStatus(appt.id, newStatus)
+                        if (filteredAppointments.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No appointments.", color = MooveOnSurfaceVariant) }
+                        } else {
+                            LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                                items(filteredAppointments) { appt ->
+                                    AppointmentCard(appointment = appt, isDoctorView = true, showActions = subTab == 1) { appointmentViewModel.updateStatus(appt.id, it) }
+                                    Spacer(Modifier.height(12.dp))
                                 }
-                                Spacer(Modifier.height(12.dp))
                             }
                         }
                     }
@@ -1179,67 +816,37 @@ fun HomeActivity.DoctorDashboardContainer(
     }
 }
 
+private fun isSameDay(d1: Date, d2: Date): Boolean {
+    val cal1 = Calendar.getInstance().apply { time = d1 }
+    val cal2 = Calendar.getInstance().apply { time = d2 }
+    return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) && cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+}
+
 @Composable
 fun RequestsScreen(viewModel: ConnectionViewModel) {
     val state by viewModel.uiState.collectAsState()
-
-    LaunchedEffect(Unit) {
-        viewModel.observeIncomingRequests()
-    }
-
+    LaunchedEffect(Unit) { viewModel.observeIncomingRequests() }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
         item {
             Spacer(Modifier.height(16.dp))
-            Text("Pending Connections", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MooveOnBackground)
+            Text("Pending Connections", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(24.dp))
         }
-        
-        if (state.isLoading) {
-            item {
-                Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MoovePrimary)
-                }
-            }
-        } else if (state.incomingRequests.isEmpty()) {
-            item { 
-                Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) {
-                    Text("No pending patient requests.", color = MooveOnSurfaceVariant)
-                }
-            }
-        }
-
+        if (state.isLoading) item { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MoovePrimary) } }
+        else if (state.incomingRequests.isEmpty()) item { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("No requests.", color = MooveOnSurfaceVariant) } }
         items(state.incomingRequests) { request ->
             MooveCard(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(request.fromName, style = MaterialTheme.typography.titleLarge, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+                        Text(request.fromName, fontWeight = FontWeight.Bold)
                         Text(request.fromEmail, style = MaterialTheme.typography.bodyMedium, color = MooveOnSurfaceVariant)
                     }
                     Row {
-                        IconButton(
-                            onClick = { viewModel.acceptRequest(request) },
-                            modifier = Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                        ) {
-                            Icon(Icons.Default.Check, contentDescription = "Accept", tint = Color(0xFF4CAF50))
-                        }
+                        IconButton(onClick = { viewModel.acceptRequest(request) }, modifier = Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.1f), RoundedCornerShape(12.dp))) { Icon(Icons.Default.Check, null, tint = Color(0xFF4CAF50)) }
                         Spacer(Modifier.width(12.dp))
-                        IconButton(
-                            onClick = { viewModel.rejectRequest(request.id) },
-                            modifier = Modifier.background(Color(0xFFE57373).copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Reject", tint = Color(0xFFE57373))
-                        }
+                        IconButton(onClick = { viewModel.rejectRequest(request.id) }, modifier = Modifier.background(Color(0xFFE57373).copy(alpha = 0.1f), RoundedCornerShape(12.dp))) { Icon(Icons.Default.Close, null, tint = Color(0xFFE57373)) }
                     }
                 }
-            }
-        }
-        
-        state.error?.let {
-            item {
-                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 16.dp))
             }
         }
     }
@@ -1251,15 +858,7 @@ fun MooveCard(
     shape: androidx.compose.ui.graphics.Shape = MaterialTheme.shapes.medium,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(
-        modifier = modifier,
-        shape = shape,
-        color = MooveSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            content = content
-        )
+    Surface(modifier = modifier, shape = shape, color = MooveSurface, border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)) {
+        Column(modifier = Modifier.padding(16.dp), content = content)
     }
 }

@@ -11,8 +11,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
@@ -27,14 +29,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.kinetiq.models.ClinicalPrescription
-import com.example.kinetiq.models.Patient
-import com.example.kinetiq.models.PrescribedExercise
-import com.example.kinetiq.models.SessionResult
+import com.example.kinetiq.models.*
+import com.example.kinetiq.ui.components.MooveToast
 import com.example.kinetiq.ui.theme.*
 import com.example.kinetiq.viewmodel.AnalyticsViewModel
 import com.example.kinetiq.viewmodel.DoctorDashboardViewModel
 import com.example.kinetiq.viewmodel.ExerciseTrendPoint
+import java.text.SimpleDateFormat
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,11 +55,12 @@ fun PatientDetailScreen(
     LaunchedEffect(patientId) {
         viewModel.fetchPatientSessions(patientId)
         analyticsViewModel.loadOverallSummary(patientId, patient)
+        viewModel.fetchMedicalNotes(patientId)
     }
 
     LaunchedEffect(state.successMessage) {
         state.successMessage?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            MooveToast.show(context, it)
             viewModel.clearMessages()
         }
     }
@@ -283,10 +285,14 @@ fun calculateImprovement(current: SessionResult, allSessions: List<SessionResult
 
 @Composable
 fun NotesTab(patient: Patient, viewModel: DoctorDashboardViewModel) {
+    val state by viewModel.uiState.collectAsState()
     var age by remember { mutableStateOf(patient.age.toString()) }
     var sex by remember { mutableStateOf(patient.sex) }
     var injuryType by remember { mutableStateOf(patient.injuryType) }
     var medicalNotes by remember { mutableStateOf(patient.medicalNotes) }
+    
+    var searchQuery by remember { mutableStateOf("") }
+    var showAddNoteDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -326,22 +332,123 @@ fun NotesTab(patient: Patient, viewModel: DoctorDashboardViewModel) {
         MooveTextField(
             value = medicalNotes,
             onValueChange = { medicalNotes = it },
-            label = "Medical History & Notes",
+            label = "Main Medical History Summary",
             singleLine = false,
-            modifier = Modifier.height(200.dp)
+            modifier = Modifier.height(150.dp)
         )
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(24.dp))
         MoovePrimaryButton(
             onClick = {
                 viewModel.updatePatientNotes(patient.id, age.toIntOrNull() ?: 0, sex, medicalNotes, injuryType)
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Save Profile & Notes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("Save Profile Summary", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(24.dp))
+
+        Spacer(Modifier.height(40.dp))
+        
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Clinical Notes History", style = MaterialTheme.typography.titleMedium, color = MooveOnBackground, fontWeight = FontWeight.Bold)
+            IconButton(onClick = { showAddNoteDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Add Note", tint = MoovePrimary)
+            }
+        }
+        
+        Spacer(Modifier.height(12.dp))
+        
+        MooveTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            label = "Search notes...",
+            modifier = Modifier.fillMaxWidth(),
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MooveOnSurfaceVariant) }
+        )
+        
+        Spacer(Modifier.height(16.dp))
+        
+        val filteredNotes = state.medicalNotes.filter { 
+            it.title.contains(searchQuery, ignoreCase = true) || it.content.contains(searchQuery, ignoreCase = true) 
+        }
+        
+        if (filteredNotes.isEmpty()) {
+            Text("No notes found matching your search", style = MaterialTheme.typography.bodySmall, color = MooveOnSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
+        } else {
+            filteredNotes.forEach { note ->
+                MedicalNoteItem(note)
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+        
+        Spacer(Modifier.height(32.dp))
     }
+    
+    if (showAddNoteDialog) {
+        AddNoteDialog(
+            onDismiss = { showAddNoteDialog = false },
+            onSave = { title, content ->
+                viewModel.addMedicalNote(patient.id, title, content)
+                showAddNoteDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun MedicalNoteItem(note: MedicalNote) {
+    val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault()) }
+    val dateStr = note.timestamp?.let { dateFormat.format(it) } ?: "Just now"
+
+    MooveCard(modifier = Modifier.fillMaxWidth()) {
+        Column {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(note.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MooveOnBackground)
+                Text(dateStr, style = MaterialTheme.typography.labelSmall, color = MooveOnSurfaceVariant)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(note.content, style = MaterialTheme.typography.bodySmall, color = MooveOnBackground)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddNoteDialog(onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var content by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New Clinical Note", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                MooveTextField(value = title, onValueChange = { title = it }, label = "Title")
+                MooveTextField(
+                    value = content, 
+                    onValueChange = { content = it }, 
+                    label = "Note Content",
+                    singleLine = false,
+                    modifier = Modifier.height(150.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (title.isNotBlank() && content.isNotBlank()) onSave(title, content) },
+                colors = ButtonDefaults.buttonColors(containerColor = MoovePrimary)
+            ) {
+                Text("Save Note")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = MooveOnSurfaceVariant)
+            }
+        },
+        containerColor = MooveBackground,
+        shape = RoundedCornerShape(16.dp)
+    )
 }
 
 @Composable

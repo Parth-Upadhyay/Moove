@@ -87,7 +87,8 @@ fun MooveTextField(
     label: String? = null,
     placeholder: String? = null,
     isError: Boolean = false,
-    singleLine: Boolean = true
+    singleLine: Boolean = true,
+    leadingIcon: @Composable (() -> Unit)? = null
 ) {
     OutlinedTextField(
         value = value,
@@ -97,6 +98,7 @@ fun MooveTextField(
         placeholder = placeholder?.let { { Text(it) } },
         isError = isError,
         singleLine = singleLine,
+        leadingIcon = leadingIcon,
         shape = RoundedCornerShape(12.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MoovePrimary,

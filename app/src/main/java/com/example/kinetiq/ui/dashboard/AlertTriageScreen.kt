@@ -23,6 +23,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.kinetiq.models.AiAlert
 import com.example.kinetiq.models.SessionResult
+import com.example.kinetiq.ui.components.MooveToast
 import com.example.kinetiq.ui.theme.*
 import com.example.kinetiq.viewmodel.DoctorDashboardViewModel
 import com.example.kinetiq.utils.DataSeeder
@@ -39,7 +40,7 @@ fun AlertTriageScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var docSummaryExpanded by remember { mutableStateOf(false) }
+    var docSummaryExpanded by remember { mutableStateOf(true) }
     var sessionAlertsExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.errorMessage, state.successMessage) {
@@ -54,7 +55,16 @@ fun AlertTriageScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { 
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = MoovePrimary,
+                    contentColor = MooveOnPrimary,
+                    shape = RoundedCornerShape(24.dp)
+                )
+            }
+        },
         containerColor = MooveBackground
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {

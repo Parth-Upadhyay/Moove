@@ -2,18 +2,17 @@ package com.example.kinetiq.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.kinetiq.models.AiAlert
-import com.example.kinetiq.models.ClinicalPrescription
-import com.example.kinetiq.models.Patient
-import com.example.kinetiq.models.SessionResult
+import com.example.kinetiq.models.*
 import com.example.kinetiq.repository.AiRepository
 import com.example.kinetiq.repository.AuthRepository
 import com.example.kinetiq.repository.FirebaseRepository
 import com.example.kinetiq.utils.InputSanitizer
 import com.example.kinetiq.utils.RateLimiter
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.Date
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
@@ -24,6 +23,7 @@ data class DashboardUiState(
     val aiAlerts: List<AiAlert> = emptyList(),
     val patients: List<Patient> = emptyList(),
     val selectedPatientSessions: List<SessionResult> = emptyList(),
+    val medicalNotes: List<MedicalNote> = emptyList(),
     val errorMessage: String? = null,
     val successMessage: String? = null,
     val canRefreshAi: Boolean = true
@@ -40,6 +40,7 @@ class DoctorDashboardViewModel @Inject constructor(
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     private val updateRateLimiter = RateLimiter(maxAttempts = 10, windowMillis = TimeUnit.MINUTES.toMillis(5))
+    private var notesJob: Job? = null
 
     init {
         fetchDashboardData()
@@ -85,8 +86,7 @@ class DoctorDashboardViewModel @Inject constructor(
                 _uiState.update { 
                     it.copy(
                         isAiLoading = false, 
-                        successMessage = "Successfully generated ${result.getOrNull()} summaries",
-                        // canRefreshAi = false // Disabled for testing: allow immediate re-refresh
+                        successMessage = "Successfully generated ${result.getOrNull()} summaries"
                     ) 
                 }
             } else {
@@ -108,14 +108,48 @@ class DoctorDashboardViewModel @Inject constructor(
         }
     }
 
+    fun fetchMedicalNotes(patientId: String) {
+        notesJob?.cancel()
+        notesJob = viewModelScope.launch {
+            repository.getMedicalNotes(patientId).collect { result ->
+                _uiState.update { it.copy(
+                    medicalNotes = result.getOrDefault(emptyList()),
+                    errorMessage = result.exceptionOrNull()?.message
+                ) }
+            }
+        }
+    }
+
+    fun addMedicalNote(patientId: String, title: String, content: String) {
+        val doctorId = authRepo.getCurrentUserId() ?: return
+        val note = MedicalNote(
+            patientId = patientId,
+            doctorId = doctorId,
+            title = InputSanitizer.sanitizeString(title, 100),
+            content = InputSanitizer.sanitizeString(content, 2000)
+        )
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            val result = repository.addMedicalNote(note)
+            if (result.isSuccess) {
+                _uiState.update { it.copy(isLoading = false, successMessage = "Note added") }
+            } else {
+                _uiState.update { it.copy(isLoading = false, errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
     fun updatePrescription(patientId: String, prescription: ClinicalPrescription) {
         if (!updateRateLimiter.shouldAllow()) {
             _uiState.update { it.copy(errorMessage = "Too many updates. Please wait a moment.") }
             return
         }
 
+        // Set the assignedAt timestamp to now when updating
         val sanitizedPrescription = prescription.copy(
-            notes = InputSanitizer.sanitizeString(prescription.notes, 1000)
+            notes = InputSanitizer.sanitizeString(prescription.notes, 1000),
+            assignedAt = Date()
         )
 
         viewModelScope.launch {

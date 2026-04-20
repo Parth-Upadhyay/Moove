@@ -9,6 +9,7 @@ class LateralArmRaiseExercise : Exercise {
     private var state = State.BELOW_LOW
     private var maxAngle = 0.0
     private var peakAngleInCurrentRep = 0.0
+    private var niceFormCounter = 0
     
     // Countdown variables
     private var startTimeMs: Long = -1
@@ -17,13 +18,13 @@ class LateralArmRaiseExercise : Exercise {
     
     private val LOWER_LIMIT = 60.0
     private val UPPER_LIMIT = 100.0
-    private val ELBOW_STRAIGHT_THRESHOLD = 135.0 
+    private val ELBOW_STRAIGHT_THRESHOLD = 160.0 
+    private val ELBOW_ACCEPTABLE_THRESHOLD = 145.0
     private val LATERAL_X_THRESHOLD = 0.50
 
     private enum class State { BELOW_LOW, MOVING_UP, ABOVE_HIGH }
 
     override fun processFrame(input: SessionInput): ExerciseResult {
-        // 1. Countdown Logic
         if (startTimeMs == -1L) {
             startTimeMs = input.timestamp_ms
         }
@@ -35,15 +36,13 @@ class LateralArmRaiseExercise : Exercise {
             return ExerciseResult(
                 repCount = 0,
                 status = "prepping",
-                reason = "Get ready!",
+                reason = null,
                 prepCountdown = (remainingPrepTime / 1000).toInt() + 1,
                 severity = Severity.GUIDANCE
             )
         }
 
-        if (!isPrepFinished) {
-            isPrepFinished = true
-        }
+        if (!isPrepFinished) isPrepFinished = true
 
         val side = input.prescription.side
         val shoulder = input.keypoints["${side}_shoulder"]
@@ -52,21 +51,22 @@ class LateralArmRaiseExercise : Exercise {
         val hip = input.keypoints["${side}_hip"]
 
         if (shoulder == null || elbow == null || wrist == null || hip == null) {
-            return ExerciseResult(repCount, "invalid", reason = "Keypoints missing")
+            return ExerciseResult(repCount, "invalid", reason = null)
         }
 
         val currentShoulderAngle = PoseMath.calculateAngle(hip, shoulder, wrist)
         val elbowAngle = PoseMath.calculateAngle(shoulder, elbow, wrist)
-        val isArmStraightEnough = elbowAngle >= ELBOW_STRAIGHT_THRESHOLD
+        val isArmStraightEnough = elbowAngle >= ELBOW_ACCEPTABLE_THRESHOLD
 
-        // Horizontal Plane Validation
         val bodyScale = abs(shoulder.y - hip.y)
         val horizontalDistRatio = abs(wrist.x - shoulder.x) / bodyScale
         val isMovingLateral = horizontalDistRatio > LATERAL_X_THRESHOLD
 
         var voiceover: String? = null
+        var status = "valid"
+        var reason: String? = null
+        val incorrectJoints = mutableListOf<String>()
 
-        // Logic gating
         if (isMovingLateral) {
             if (currentShoulderAngle > maxAngle) maxAngle = currentShoulderAngle
 
@@ -79,10 +79,19 @@ class LateralArmRaiseExercise : Exercise {
                 }
                 State.MOVING_UP -> {
                     if (currentShoulderAngle > peakAngleInCurrentRep) peakAngleInCurrentRep = currentShoulderAngle
+                    
+                    // Feedback ONLY in counting range
+                    if (!isArmStraightEnough) {
+                        reason = "Straighten your elbow"
+                        incorrectJoints.add("${side}_elbow")
+                    } else if (elbowAngle >= ELBOW_STRAIGHT_THRESHOLD && currentShoulderAngle > (LOWER_LIMIT + UPPER_LIMIT) / 2) {
+                        niceFormCounter++
+                        if (niceFormCounter % 50 == 0) voiceover = "Nice form"
+                    }
+
                     if (currentShoulderAngle >= UPPER_LIMIT) {
                         if (isArmStraightEnough) {
                             repCount++
-                            voiceover = repCount.toString()
                             state = State.ABOVE_HIGH
                         }
                     }
@@ -101,20 +110,9 @@ class LateralArmRaiseExercise : Exercise {
             }
         }
 
-        var status = "valid"
-        var reason: String? = null
-        val incorrectJoints = mutableListOf<String>()
-
-        // Error Handling
-        if (currentShoulderAngle > 45.0 && !isMovingLateral) {
-            reason = "Move your arms out to the side, not in front"
+        if (currentShoulderAngle > LOWER_LIMIT && !isMovingLateral) {
+            reason = "Move arms to the side"
             status = "invalid"
-        } else if (!isArmStraightEnough && currentShoulderAngle > LOWER_LIMIT) {
-            reason = "Try to keep your arm straighter"
-        }
-
-        if (!isArmStraightEnough && currentShoulderAngle > 45.0) {
-            incorrectJoints.add("${side}_elbow")
         }
 
         return ExerciseResult(
@@ -125,7 +123,7 @@ class LateralArmRaiseExercise : Exercise {
             voiceover = voiceover,
             currentRom = currentShoulderAngle,
             peakMotion = maxAngle,
-            severity = if (status == "invalid") Severity.WARNING else Severity.NONE,
+            severity = if (reason != null) Severity.WARNING else Severity.NONE,
             prepCountdown = 0
         )
     }

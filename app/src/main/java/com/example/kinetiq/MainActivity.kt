@@ -25,6 +25,7 @@ import com.example.kinetiq.exercises.Severity
 import com.example.kinetiq.models.*
 import com.example.kinetiq.ui.components.ExerciseDemoPlayer
 import com.example.kinetiq.ui.theme.MooveTheme
+import com.example.kinetiq.utils.showLogoSnackbar
 import com.google.android.material.textfield.TextInputEditText
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
@@ -77,6 +78,9 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
 
     private var selectedExercise: String = "pendulum"
     private var selectedSide: String = "right"
+    private var targetSets: Int = 3
+    private var targetReps: Int = 10
+    
     private var currentIncorrectJoints: List<String> = emptyList()
     private var isSessionStarted = false
     
@@ -88,6 +92,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     private var peakMotionAcrossSession: Double = 0.0
     private var totalRepsAcrossSession: Int = 0
     private var initialPainScore: Int = 0
+    private var currentSetsCompleted: Int = 0
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -106,6 +111,8 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         
         selectedExercise = intent.getStringExtra("EXERCISE_TYPE") ?: "pendulum"
         selectedSide = intent.getStringExtra("SELECTED_SIDE") ?: "right"
+        targetSets = intent.getIntExtra("TARGET_SETS", 3).coerceAtLeast(1)
+        targetReps = intent.getIntExtra("TARGET_REPS", 10).coerceAtLeast(1)
         
         // Load voice settings passed from HomeActivity
         voiceFeedbackEnabled = intent.getBooleanExtra("VOICE_FEEDBACK_ENABLED", false)
@@ -267,6 +274,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
         isSessionStarted = true
         sessionStartTime = System.currentTimeMillis()
         totalRepsAcrossSession = 0
+        currentSetsCompleted = 0
         
         val initialInput = createDummyInput(selectedExercise, selectedSide)
         sessionManager.startSession(initialInput)
@@ -287,7 +295,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     private fun saveSessionReport() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid
         if (uid == null) {
-            Toast.makeText(this, "Not logged in!", Toast.LENGTH_SHORT).show()
+            findViewById<View>(android.R.id.content).showLogoSnackbar("Not logged in!")
             finish()
             return
         }
@@ -299,7 +307,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
 
         val postPainEntry = PainEntry(
             rep = totalRepsAcrossSession,
-            set = 1,
+            set = currentSetsCompleted,
             level = postPainSeekBar.progress.toString(),
             timestamp_ms = System.currentTimeMillis()
         )
@@ -313,11 +321,11 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
             exercise = selectedExercise,
             side = selectedSide,
             protocol_stage = 1,
-            prescription = Prescription(selectedExercise, 3, 10, 10, selectedSide, null, null, null, 20, false, ""),
+            prescription = Prescription(selectedExercise, targetSets, targetReps, 0, selectedSide, null, null, null, 20, false, ""),
             pre_session = PreSession(initialPainScore, 0, 8, "normal", 0, false, false, ""),
             context = SessionContext(0.8f, true, 72, 50, emptyList()),
             results = PerformanceResults(
-                sets_completed = 1,
+                sets_completed = currentSetsCompleted,
                 reps_per_set = listOf(totalRepsAcrossSession),
                 valid_reps = totalRepsAcrossSession,
                 compensated_reps = 0,
@@ -349,12 +357,12 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
 
         batch.commit()
             .addOnSuccessListener {
-                Toast.makeText(this, "Session Logged Successfully!", Toast.LENGTH_LONG).show()
+                findViewById<View>(android.R.id.content).showLogoSnackbar("Session Logged Successfully!")
                 finish()
             }
             .addOnFailureListener { e ->
                 Log.e("MainActivity", "Error saving session", e)
-                Toast.makeText(this, "Failed to log session: ${e.message}", Toast.LENGTH_SHORT).show()
+                findViewById<View>(android.R.id.content).showLogoSnackbar("Failed to log session: ${e.message}")
             }
     }
 
@@ -446,8 +454,8 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
             timestamp_ms = System.currentTimeMillis(),
             keypoints = keypoints,
             pre_session = PreSession(initialPainScore, 0, 8, "normal", 0, false, false, ""),
-            patient_context = PatientContext("recovery", "", 4, side, 42, emptyList(), "en", false, 74, 48, 4000),
-            prescription = Prescription(exercise, 3, 10, 10, side, null, null, null, 20, false, ""),
+            patient_context = PatientContext("recovery", "", 1, side, 42, emptyList(), "en", false, 74, 48, 4000),
+            prescription = Prescription(exercise, targetSets, targetReps, 0, side, null, null, null, 20, false, ""),
             session_history_summary = SessionHistorySummary(3, 5, 80f, 0, 0, 0.8f)
         )
     }
@@ -512,6 +520,7 @@ class MainActivity : AppCompatActivity(), PhysioSessionManager.SessionUpdateList
     override fun onSetCountUpdated(currentSet: Int, totalSets: Int) {
         runOnUiThread {
             setCounterText.text = "$currentSet / $totalSets"
+            currentSetsCompleted = currentSet
         }
     }
     

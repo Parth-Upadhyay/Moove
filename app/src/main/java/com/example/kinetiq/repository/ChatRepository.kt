@@ -31,7 +31,9 @@ class ChatRepository @Inject constructor(
 
         val conversationId = getConversationId(currentUserId, otherUserId)
 
-        // Query by conversationId. We sort in memory to avoid the need for a composite index.
+        // We remove orderBy("timestamp") to avoid index requirements and to ensure
+        // messages with null timestamps (local writes) are still included.
+        // We will sort them in memory.
         val query = db.collection("messages")
             .whereEqualTo("conversationId", conversationId)
 
@@ -41,9 +43,10 @@ class ChatRepository @Inject constructor(
                 return@addSnapshotListener
             }
             
+            val now = Date()
             val messages = snapshot?.documents?.mapNotNull { doc ->
                 doc.toObject(Message::class.java)
-            }?.sortedBy { it.timestamp ?: Date() } ?: emptyList()
+            }?.sortedBy { it.timestamp ?: now } ?: emptyList()
             
             trySend(Result.success(messages))
         }
@@ -64,7 +67,7 @@ class ChatRepository @Inject constructor(
                 conversationId = conversationId,
                 content = content,
                 type = type,
-                timestamp = null // Firestore will fill this with ServerTimestamp
+                timestamp = null // Firestore ServerTimestamp handles this
             )
             
             db.collection("messages").document(messageId).set(message).await()

@@ -24,6 +24,12 @@ service cloud.firestore {
       );
     }
 
+    // Medical Notes:
+    // - Doctors can read/write notes they created for their patients
+    match /medical_notes/{noteId} {
+      allow read, write: if request.auth != null && isDoctor();
+    }
+
     // Messages collection:
     // - Users can only see messages where they are either sender or receiver
     // - Doctors can only see messages for their assigned patients (enforced by the query in app)

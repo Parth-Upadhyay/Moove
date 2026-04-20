@@ -89,11 +89,25 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(vertical = 16.dp)
             ) {
-                items(state.messages) { message ->
-                    MessageBubble(
-                        message = message,
-                        isCurrentUser = message.senderId == currentUserId
-                    )
+                var lastDate = ""
+                state.messages.forEach { message ->
+                    val messageDate = message.timestamp?.let { 
+                        SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault()).format(it)
+                    } ?: ""
+                    
+                    if (messageDate != lastDate && messageDate.isNotEmpty()) {
+                        item(key = "date_$messageDate") {
+                            DateHeader(messageDate)
+                        }
+                        lastDate = messageDate
+                    }
+                    
+                    item(key = message.id) {
+                        MessageBubble(
+                            message = message,
+                            isCurrentUser = message.senderId == currentUserId
+                        )
+                    }
                 }
             }
 
@@ -153,6 +167,29 @@ fun ChatScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun DateHeader(date: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = MooveSurfaceVariant.copy(alpha = 0.5f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text(
+                text = date,
+                style = MaterialTheme.typography.labelSmall,
+                color = MooveOnSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }

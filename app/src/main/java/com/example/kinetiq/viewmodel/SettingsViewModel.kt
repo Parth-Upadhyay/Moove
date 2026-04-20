@@ -29,8 +29,8 @@ class SettingsViewModel @Inject constructor() : ViewModel() {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
     
-    // Rate limit settings updates: 5 per minute
-    private val settingsRateLimiter = RateLimiter(maxAttempts = 5, windowMillis = TimeUnit.MINUTES.toMillis(1))
+    // Rate limit settings updates: 10 per minute (increased for better responsiveness)
+    private val settingsRateLimiter = RateLimiter(maxAttempts = 10, windowMillis = TimeUnit.MINUTES.toMillis(1))
 
     init {
         loadSettings()
@@ -39,44 +39,62 @@ class SettingsViewModel @Inject constructor() : ViewModel() {
     private fun loadSettings() {
         val uid = auth.currentUser?.uid ?: return
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+            _uiState.update { it.copy(isLoading = true) }
             try {
                 val doc = db.collection("settings").document(uid).get().await()
                 val settings = doc.toObject(NotificationSettings::class.java) ?: NotificationSettings(userId = uid)
-                _uiState.value = SettingsUiState(notificationSettings = settings, isLoading = false)
+                _uiState.update { it.copy(notificationSettings = settings, isLoading = false) }
             } catch (e: Exception) {
-                _uiState.value = SettingsUiState(error = e.message, isLoading = false)
+                _uiState.update { it.copy(error = e.message, isLoading = false) }
             }
         }
     }
 
     fun toggleNotifications(enabled: Boolean) {
-        val settings = _uiState.value.notificationSettings.copy(isEnabled = enabled)
+        val currentSettings = _uiState.value.notificationSettings
+        val settings = currentSettings.copy(isEnabled = enabled)
+        // Optimistic update
+        _uiState.update { it.copy(notificationSettings = settings) }
         saveSettings(settings)
     }
 
     fun toggleVoiceFeedback(enabled: Boolean) {
-        val settings = _uiState.value.notificationSettings.copy(isVoiceFeedbackEnabled = enabled)
+        val currentSettings = _uiState.value.notificationSettings
+        val settings = currentSettings.copy(isVoiceFeedbackEnabled = enabled)
+        // Optimistic update
+        _uiState.update { it.copy(notificationSettings = settings) }
         saveSettings(settings)
     }
     
     fun toggleVoiceCount(enabled: Boolean) {
-        val settings = _uiState.value.notificationSettings.copy(isVoiceCountEnabled = enabled)
+        val currentSettings = _uiState.value.notificationSettings
+        val settings = currentSettings.copy(isVoiceCountEnabled = enabled)
+        // Optimistic update
+        _uiState.update { it.copy(notificationSettings = settings) }
         saveSettings(settings)
     }
 
     fun addReminderTime(time: String) {
-        val currentTimes = _uiState.value.notificationSettings.reminderTimes.toMutableList()
+        val currentSettings = _uiState.value.notificationSettings
+        val currentTimes = currentSettings.reminderTimes.toMutableList()
         if (!currentTimes.contains(time)) {
             currentTimes.add(time)
-            saveSettings(_uiState.value.notificationSettings.copy(reminderTimes = currentTimes))
+            val newSettings = currentSettings.copy(reminderTimes = currentTimes)
+            // Optimistic update
+            _uiState.update { it.copy(notificationSettings = newSettings) }
+            saveSettings(newSettings)
         }
     }
 
     fun removeReminderTime(time: String) {
-        val currentTimes = _uiState.value.notificationSettings.reminderTimes.toMutableList()
-        currentTimes.remove(time)
-        saveSettings(_uiState.value.notificationSettings.copy(reminderTimes = currentTimes))
+        val currentSettings = _uiState.value.notificationSettings
+        val currentTimes = currentSettings.reminderTimes.toMutableList()
+        if (currentTimes.remove(time)) {
+            val newSettings = currentSettings.copy(reminderTimes = currentTimes)
+            // Optimistic update
+            _uiState.update { it.copy(notificationSettings = newSettings) }
+            saveSettings(newSettings)
+        }
     }
 
     private fun saveSettings(settings: NotificationSettings) {
@@ -89,9 +107,8 @@ class SettingsViewModel @Inject constructor() : ViewModel() {
         viewModelScope.launch {
             try {
                 db.collection("settings").document(uid).set(settings).await()
-                _uiState.value = _uiState.value.copy(notificationSettings = settings)
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(error = "Failed to save: ${e.message}")
+                _uiState.update { it.copy(error = "Failed to save: ${e.message}") }
             }
         }
     }

@@ -36,6 +36,16 @@ data class Patient(
 )
 
 @IgnoreExtraProperties
+data class MedicalNote(
+    var id: String = "",
+    var patientId: String = "",
+    var doctorId: String = "",
+    var title: String = "",
+    var content: String = "",
+    @ServerTimestamp var timestamp: Date? = Date() // Default to current date for local latency compensation
+)
+
+@IgnoreExtraProperties
 data class ClinicalPrescription(
     var exercises: List<PrescribedExercise> = emptyList(),
     var frequencyPerWeek: Int = 0,

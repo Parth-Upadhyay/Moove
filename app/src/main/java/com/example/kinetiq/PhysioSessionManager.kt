@@ -45,7 +45,7 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
     private var activeMessage: String? = null
     private var lastPostedMessage: String? = null
     private var messageExpiryTime: Long = 0
-    private val MIN_MESSAGE_DURATION_MS = 5000L // Instructions stay for 5 seconds
+    private val MIN_MESSAGE_DURATION_MS = 4000L 
 
     private fun createExerciseInstance(name: String): Exercise? {
         return when (name.lowercase()) {
@@ -74,7 +74,6 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
         isFirstFrameOfExercise = true
         
         lastInteractionTime = input.timestamp_ms
-        postFeedback(ProtocolManager.getStageMessage(input.patient_context.protocol_stage), Severity.GUIDANCE, input.timestamp_ms)
 
         if (exerciseName == "forward_arm_raise") {
             val side = input.prescription.side.uppercase()
@@ -103,12 +102,11 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
                 listener.onTimerUpdated(null)
                 listener.onSetCountUpdated(currentSet, totalSets)
                 listener.onRepCountUpdated(repsInCurrentSet, targetRepsPerSet)
-                postFeedback("Get ready for Set $currentSet", Severity.GUIDANCE, currentTime, force = true)
             } else {
                 listener.onTimerUpdated(remaining)
                 if (remaining <= 5 && remaining != lastAnnouncedRestSecond) {
                     lastAnnouncedRestSecond = remaining
-                    postFeedback(remaining.toString(), Severity.GUIDANCE, currentTime, force = true)
+                    postFeedback("In $remaining", Severity.GUIDANCE, currentTime, force = true)
                 }
             }
             return
@@ -123,7 +121,7 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
             lowConfFrameCounter++
             if (lowConfFrameCounter > 30) {
                 isPaused = true
-                postTip("Camera can't see your joints clearly — adjust your position", currentTime)
+                postTip("Camera can't see your joints clearly", currentTime)
             }
             return
         } else {
@@ -136,10 +134,6 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
             postFeedback(it.message, it.severity, currentTime)
         }
 
-        if (currentTime - lastInteractionTime > 180000) {
-            listener.onSecurityAlert("Are you okay?")
-        }
-
         currentExercise?.let { exercise ->
             val result = exercise.processFrame(input)
             
@@ -147,35 +141,30 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
             listener.onPeakMotionUpdated(result.peakMotion)
             listener.onHoldCountdown(result.holdCountdown)
             
-            // Handle prep countdown timer (start of exercise/set)
             if (result.prepCountdown != null && result.prepCountdown > 0) {
                 listener.onTimerUpdated(result.prepCountdown)
-                return@let // Skip rep counting while prepping
             } else if (result.prepCountdown == 0 && !isResting) {
                 listener.onTimerUpdated(null)
             }
 
-            // Sync initial rep count to avoid counting starting position as a rep
             if (isFirstFrameOfExercise) {
                 lastExerciseTotalReps = result.repCount
                 isFirstFrameOfExercise = false
-                return@let // Skip counting on the exact sync frame
+                return@let 
             }
 
-            // Handle voiceover from result (countdowns or rep numbers)
             if (result.voiceover != null) {
                 postFeedback(result.voiceover, Severity.POSITIVE, currentTime, force = true)
             }
             
             val msg = if (result.status == "invalid") {
-                result.reason ?: "Incorrect form detected"
+                result.reason 
             } else if (result.status == "prepping") {
-                result.reason ?: "Get ready!"
+                result.reason
             } else {
                 null
             }
 
-            // Don't post descriptive message if we just voiced a countdown/number
             if (msg != null && result.voiceover == null) {
                 postFeedback(msg, result.severity, currentTime)
                 if (result.severity == Severity.WARNING) {
@@ -189,21 +178,15 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
                 repsInCurrentSet += delta
                 lastInteractionTime = currentTime
                 
-                // Voice count the rep if the exercise didn't already provide a voiceover
-                if (result.voiceover == null) {
-                    postFeedback(repsInCurrentSet.toString(), Severity.POSITIVE, currentTime, force = true)
-                }
-                
                 listener.onRepCompleted(delta)
                 
                 if (repsInCurrentSet >= targetRepsPerSet) {
                     if (currentSet >= totalSets) {
                         listener.onRepCountUpdated(repsInCurrentSet, targetRepsPerSet)
-                        listener.onSessionEnded("Exercise complete!", "high")
+                        listener.onSessionEnded("Exercise complete", "high")
                     } else {
                         isResting = true
                         restStartTime = currentTime
-                        postFeedback("Set complete! Take a break.", Severity.POSITIVE, currentTime, force = true)
                         listener.onRepCountUpdated(repsInCurrentSet, targetRepsPerSet)
                     }
                 } else {
@@ -216,8 +199,7 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
     private fun postFeedback(message: String, severity: Severity, currentTime: Long, force: Boolean = false) {
         if (isResting && !force) return
 
-        // Prevent spamming the exact same voice feedback multiple times a second
-        if (message == lastPostedMessage && (force || message.all { it.isDigit() })) {
+        if (message == lastPostedMessage && (force || message.contains("In "))) {
             return
         }
 
@@ -225,8 +207,8 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
             activeMessage = message
             lastPostedMessage = message
             
-            val isNumber = message.all { it.isDigit() }
-            val duration = if (isNumber) 1000L else MIN_MESSAGE_DURATION_MS
+            val isCountdown = message.contains("In ")
+            val duration = if (isCountdown) 1000L else MIN_MESSAGE_DURATION_MS
             messageExpiryTime = currentTime + duration
             listener.onVoiceFeedback(message, severity)
         }
@@ -266,7 +248,6 @@ class PhysioSessionManager(private val listener: SessionUpdateListener) {
         val required = getRequiredLandmarks(input.prescription.side)
         if (required.all { name -> (input.keypoints[name]?.conf ?: 0f) > 0.70 }) {
             isPaused = false
-            postTip("Resuming session...", input.timestamp_ms)
         }
     }
 }

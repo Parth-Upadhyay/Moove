@@ -150,12 +150,11 @@ class AnalyticsViewModel @Inject constructor(
         val weightedScore = if (activeExercisesCount > 0) {
             val avgLatestOpt = latestOptimalitySum / activeExercisesCount
             val avgLatestPain = latestPainSum / activeExercisesCount
-            // Optimality counts for 60%, Pain Reduction for 40%
             val painScore = ((10.0 - avgLatestPain).coerceIn(0.0, 10.0) / 10.0) * 100.0
             (avgLatestOpt * 0.6) + (painScore * 0.4)
         } else 0.0
 
-        // Calculate Adherence for the LAST WEEK ONLY
+        // Weekly Adherence Logic - Last 7 Days
         val calendar = Calendar.getInstance()
         calendar.add(Calendar.DAY_OF_YEAR, -7)
         val oneWeekAgo = calendar.time
@@ -168,21 +167,28 @@ class AnalyticsViewModel @Inject constructor(
         var totalCompletedSets = 0
         var totalPrescribedSets = 0
 
-        patientData?.clinicalPrescription?.exercises?.filter { it.isActive }?.forEach { prescribed ->
+        val prescription = patientData?.clinicalPrescription
+        val frequency = (prescription?.frequencyPerWeek ?: 7).coerceAtLeast(1)
+
+        // Adherence is calculated against CURRENT prescription to show immediate goal progress
+        // We remove the date filter that was blocking sessions done before a prescription update
+        prescription?.exercises?.filter { it.isActive }?.forEach { prescribed ->
             val exerciseSessions = recentSessions.filter { it.exercise == prescribed.exerciseId }
             val completedSets = exerciseSessions.sumOf { it.results.sets_completed }
-            val prescribedSetsPerWeek = prescribed.sets * (patientData.clinicalPrescription?.frequencyPerWeek ?: 7)
             
-            adherenceBreakdown[prescribed.exerciseId] = Pair(completedSets, prescribedSetsPerWeek)
+            // Weekly target = sets per day * frequency per week
+            val targetSetsPerDay = prescribed.sets.coerceAtLeast(1)
+            val weeklyTarget = targetSetsPerDay * frequency
+            
+            adherenceBreakdown[prescribed.exerciseId] = Pair(completedSets, weeklyTarget)
             totalCompletedSets += completedSets
-            totalPrescribedSets += prescribedSetsPerWeek
+            totalPrescribedSets += weeklyTarget
         }
 
         val adherenceRate = if (totalPrescribedSets > 0) {
             (totalCompletedSets.toFloat() / totalPrescribedSets.toFloat()).coerceIn(0f, 1f)
         } else 0f
 
-        // Calculate exercises left today
         val today = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
@@ -194,7 +200,7 @@ class AnalyticsViewModel @Inject constructor(
             parseIsoDate(it.timestamp_end)?.after(today) == true 
         }.map { it.exercise }.toSet()
         
-        val prescribedExercises = patientData?.clinicalPrescription?.exercises?.filter { it.isActive }?.map { it.exerciseId } ?: emptyList()
+        val prescribedExercises = prescription?.exercises?.filter { it.isActive }?.map { it.exerciseId } ?: emptyList()
         val leftToday = prescribedExercises.count { it !in sessionsToday }
 
         val lastDate = if (sessions.isNotEmpty()) {

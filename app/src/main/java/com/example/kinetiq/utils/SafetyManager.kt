@@ -20,41 +20,15 @@ object SafetyManager {
         
         if (pre.pain_score >= 7) {
             return SafetyAction(
-                "High pain. Rest.",
+                "High pain",
                 Severity.CRITICAL,
                 blockSession = true
             )
         }
 
-        if (pre.pain_score >= 5) {
-            return SafetyAction(
-                "Moderate pain. Careful.",
-                Severity.WARNING
-            )
-        }
-
-        if (pre.medication_taken_mins_ago < 60) {
-            return SafetyAction(
-                "Meds taken. Careful.",
-                Severity.WARNING
-            )
-        }
-
-        if (pre.sleep_hours < 5) {
-            val adjusted = input.prescription.copy(
-                sets = (input.prescription.sets - 1).coerceAtLeast(1),
-                reps = (input.prescription.reps * 0.8).toInt()
-            )
-            return SafetyAction(
-                "Light session today.",
-                Severity.GUIDANCE,
-                adjustedPrescription = adjusted
-            )
-        }
-
         if (context.heart_rate_bpm > 100) {
             return SafetyAction(
-                "Pulse high. Rest.",
+                "Pulse high",
                 Severity.WARNING,
                 pauseSession = true
             )
@@ -66,20 +40,12 @@ object SafetyManager {
     fun checkMidSession(input: SessionInput, recentFormErrors: Int): SafetyAction? {
         if (input.patient_context.heart_rate_bpm > 130) {
             return SafetyAction(
-                "Pulse high. Rest.",
+                "Pulse high",
                 Severity.WARNING,
                 pauseSession = true
             )
         }
-
-        if (recentFormErrors >= 4) {
-            return SafetyAction(
-                "Tiring. Take rest.",
-                Severity.WARNING,
-                pauseSession = true
-            )
-        }
-
+        // Removed "Tiring. Take rest" as per request to remove weird advice
         return null
     }
 }
