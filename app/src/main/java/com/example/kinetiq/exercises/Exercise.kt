@@ -14,6 +14,7 @@ data class ExerciseResult(
     val voiceover: String? = null,
     val currentRom: Double? = null,
     val holdCountdown: Int? = null,
+    val holdProgress: Float? = null, // 0.0 to 1.0 progress of a hold
     val prepCountdown: Int? = null, // Added for the 5-second start timer
     val severity: Severity = Severity.NONE,
     val peakMotion: Double = 0.0
