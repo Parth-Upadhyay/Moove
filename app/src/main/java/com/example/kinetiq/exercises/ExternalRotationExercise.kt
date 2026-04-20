@@ -9,30 +9,34 @@ class ExternalRotationExercise : Exercise {
     private var state = State.START
     private var holdStartMs: Long = 0
     private var repMaxAngle = 0.0       // resets each rep
-    private var peakMotion = 0.0        // all-time peak — never resets
+    private var peakMotion = 0.0        // all-time peak across all reps
     private var startTimeMs: Long? = null
     private var lastSecondsLeft = -1    // for voiceover consistency
 
     // Smoothing: rolling average over last N frames to suppress keypoint jitter
     private val angleBuffer = ArrayDeque<Double>()
 
-    // Drop tolerance: forgive brief dips below EXIT_PEAK_ANGLE during the hold
+    // Drop tolerance: forgive brief dips or form breaks during the hold
     private var dropStartMs: Long? = null
 
     private enum class State { START, ROTATING, PEAK, RETURNING }
 
     companion object {
-        private const val STARTUP_DELAY_MS    = 5_000L   // grace period on launch
-        private const val TARGET_HOLD_MS      = 3_000L   // required peak hold
-        private const val SMOOTHING_WINDOW    = 10       // increased for stability
-        private const val ENTER_ROTATE_ANGLE  = 45.0    // ° arm starts rotating
-        private const val EXIT_ROTATE_ANGLE   = 35.0    // ° hysteresis — drop resets ROTATING
-        private const val ENTER_PEAK_ANGLE    = 85.0    // ° qualifies as peak (UPDATED)
-        private const val EXIT_PEAK_ANGLE     = 75.0    // ° hysteresis — drop breaks hold (UPDATED)
-        private const val RETURN_NEUTRAL_ANGLE = 20.0   // ° arm considered back at neutral (UPDATED)
-        private const val MIN_REP_ROM         = 80.0    // ° minimum peak ROM to count a rep (UPDATED)
-        private const val DROP_TOLERANCE_MS   = 1_000L  // forgive dips shorter than 1.0 s
-        private const val MAX_ELBOW_FLARE     = 30.0    // max allowed angle between torso and arm
+        private const val STARTUP_DELAY_MS    = 2_000L   // Reduced to 2s to save time
+        private const val TARGET_HOLD_MS      = 3_000L   // required peak hold duration
+        private const val SMOOTHING_WINDOW    = 20       // High smoothing to handle glitchy skeleton
+        
+        // Thresholds for the horizontal displacement-based "angle" (mapped to 0-90)
+        private const val ENTER_ROTATE_ANGLE  = 20.0    // start moving hand away from midline
+        private const val EXIT_ROTATE_ANGLE   = 12.0    // drop back too close to start
+        private const val ENTER_PEAK_ANGLE    = 80.0    // nearly at full 90 degree rotation
+        private const val EXIT_PEAK_ANGLE     = 65.0    // buffer for instability during hold
+        private const val RETURN_NEUTRAL_ANGLE = 15.0   // full return to starting position
+        private const val MIN_REP_ROM         = 75.0    // minimum rotation required to count a rep
+        
+        private const val DROP_TOLERANCE_MS   = 1_200L  // 1.2s forgiveness for glitchy frames
+        private const val MAX_ELBOW_FLARE_X   = 0.08    // Strict horizontal distance for tucked elbow
+        private const val MAX_HORIZONTAL_ERROR = 0.07   // Max vertical dev from elbow for "parallel" forearm
     }
 
     override fun processFrame(input: SessionInput): ExerciseResult {
@@ -52,13 +56,33 @@ class ExternalRotationExercise : Exercise {
             return ExerciseResult(repCount, "invalid", reason = "Keypoints missing")
         }
 
-        // --- Angle: shoulder → elbow → wrist (increases with external rotation) ---
-        val rawAngle = PoseMath.calculateAngle(shoulder, elbow, wrist)
+        // --- 2D Rotation Logic (Horizontal Displacement) ---
+        val armRefLength = sqrt(
+            (shoulder.x - elbow.x).toDouble().pow(2) +
+            (shoulder.y - elbow.y).toDouble().pow(2)
+        ).coerceAtLeast(0.01)
+        
+        val wristDispX = abs(wrist.x - elbow.x).toDouble()
+        val rotationRatio = (wristDispX / armRefLength).coerceIn(0.0, 1.0)
+        val currentRotationAngle = rotationRatio * 90.0
 
         // --- Rolling average smoothing ---
         if (angleBuffer.size >= SMOOTHING_WINDOW) angleBuffer.removeFirst()
-        angleBuffer.addLast(rawAngle)
+        angleBuffer.addLast(currentRotationAngle)
         val smoothAngle = angleBuffer.average()
+
+        // --- Form Validation ---
+        val elbowFlareX = abs(elbow.x - shoulder.x).toDouble()
+        val isFlaring = elbowFlareX > MAX_ELBOW_FLARE_X
+        
+        val verticalDev = abs(wrist.y - elbow.y).toDouble()
+        val isNotHorizontal = verticalDev > MAX_HORIZONTAL_ERROR
+
+        val incorrectJoints = mutableListOf<String>()
+        val shouldWarn = (state == State.ROTATING || state == State.PEAK)
+        if (shouldWarn && isFlaring) {
+            incorrectJoints.add("${side}_elbow")
+        }
 
         // --- Grace period ---
         if (isGracePeriod) {
@@ -76,24 +100,13 @@ class ExternalRotationExercise : Exercise {
                 peakMotion = peakMotion,
                 prepCountdown = secondsLeft,
                 voiceover = voice,
-                reason     = "Get ready — keep your elbow at your side, forearm forward"
+                reason     = "Ready? Keep your elbow tucked against your side"
             )
         }
 
         // --- Peak tracking ---
         if (smoothAngle > repMaxAngle) repMaxAngle = smoothAngle
         if (smoothAngle > peakMotion)  peakMotion  = smoothAngle
-
-        // --- Form Validation: Elbow Flare ---
-        val flareAngle = PoseMath.calculateAngle(hip, shoulder, elbow)
-        val isFlaring = flareAngle > MAX_ELBOW_FLARE
-        val incorrectJoints = mutableListOf<String>()
-        
-        // Only flag form errors during active movement or hold states
-        val shouldFlagForm = (state == State.ROTATING || state == State.PEAK)
-        if (isFlaring && shouldFlagForm) {
-            incorrectJoints.add("${side}_elbow")
-        }
 
         // --- State machine ---
         var holdCountdown: Int? = null
@@ -106,11 +119,9 @@ class ExternalRotationExercise : Exercise {
                 dropStartMs = null
                 if (smoothAngle >= ENTER_ROTATE_ANGLE) {
                     state       = State.ROTATING
-                    repMaxAngle = smoothAngle   // start fresh for this rep
-                    reason      = "Keep rotating outward!"
-                } else {
-                    reason = "Rotate your forearm outward, keeping your elbow at your side"
+                    repMaxAngle = smoothAngle
                 }
+                reason = "Rotate your hand outward"
             }
 
             State.ROTATING -> {
@@ -118,15 +129,23 @@ class ExternalRotationExercise : Exercise {
                     smoothAngle < EXIT_ROTATE_ANGLE -> {
                         state       = State.START
                         repMaxAngle = 0.0
-                        reason      = "Arm dropped — start the rotation again"
+                        reason      = "Keep your hand rotated out"
                     }
                     smoothAngle >= ENTER_PEAK_ANGLE -> {
-                        state       = State.PEAK
-                        holdStartMs = input.timestamp_ms
-                        reason      = "Excellent! Hold this 90-degree position"
+                        if (!isNotHorizontal) {
+                            state       = State.PEAK
+                            holdStartMs = input.timestamp_ms
+                            reason      = "Hold that 90-degree rotation"
+                        } else {
+                            reason = "Keep your forearm level (parallel to floor)"
+                        }
                     }
                     else -> {
-                        reason = if (isFlaring) "Keep your elbow tucked against your side" else "Keep rotating — almost at 90 degrees!"
+                        reason = when {
+                            isFlaring -> "Keep your elbow tucked"
+                            isNotHorizontal -> "Keep your forearm level"
+                            else -> "Rotate your hand further out"
+                        }
                     }
                 }
             }
@@ -141,8 +160,7 @@ class ExternalRotationExercise : Exercise {
                     voiceover = if (remainingSec > 0) remainingSec.toString() else null
                 }
 
-                // Logic Check: Break hold if either ROM drops or elbow flares
-                val isFormBroken = smoothAngle < EXIT_PEAK_ANGLE || isFlaring
+                val isFormBroken = smoothAngle < EXIT_PEAK_ANGLE || isFlaring || isNotHorizontal
 
                 when {
                     isFormBroken -> {
@@ -151,43 +169,42 @@ class ExternalRotationExercise : Exercise {
                             state         = State.START
                             repMaxAngle   = 0.0
                             dropStartMs   = null
-                            reason = "Keep your form steady at 90 degrees."
+                            reason = "Form lost — keep your elbow tucked and arm out"
                         } else {
                             holdCountdown = remainingSec
-                            reason = "Form slipping! Stay steady at 90 degrees"
+                            reason = when {
+                                isFlaring -> "Keep your elbow tucked!"
+                                isNotHorizontal -> "Keep your forearm level"
+                                else -> "Hold that rotation"
+                            }
                         }
                     }
-
                     heldMs >= TARGET_HOLD_MS -> {
-                        dropStartMs   = null
                         state         = State.RETURNING
-                        holdCountdown = null
                         holdProgress  = 1f
-                        reason = "Hold complete! Slowly rotate back to start"
+                        reason = "Great job! Now slowly return"
                         voiceover = "Great job!"
                     }
-
                     else -> {
                         dropStartMs   = null
                         holdCountdown = remainingSec
-                        reason = if (isFlaring) "Keep your elbow tucked!" else "Maintain this 90-degree stretch — ${remainingSec}s"
+                        reason = "Hold that 90-degree rotation"
                     }
                 }
             }
 
             State.RETURNING -> {
                 if (smoothAngle > RETURN_NEUTRAL_ANGLE) {
-                    reason = "Slowly rotate your arm back to the starting position"
+                    reason = "Return your hand to the front"
                 } else {
                     if (repMaxAngle >= MIN_REP_ROM) {
                         repCount++
                         voiceover = repCount.toString()
-                        reason = "Rep complete! Great work 💪"
-                    } else {
-                        reason = "Rep not counted — rotate closer to 90 degrees next time"
+                        reason = "Rep complete!"
                     }
                     repMaxAngle = 0.0
                     state = State.START
+                    reason = "Ready"
                 }
             }
         }
@@ -195,8 +212,8 @@ class ExternalRotationExercise : Exercise {
         return ExerciseResult(
             repCount         = repCount,
             status           = if (incorrectJoints.isNotEmpty()) "invalid" else "valid",
-            severity         = if (incorrectJoints.isNotEmpty()) Severity.WARNING else Severity.NONE,
-            currentRom       = smoothAngle, // Use smoothAngle for real-time visualization
+            severity         = if (incorrectJoints.isNotEmpty() && shouldWarn) Severity.WARNING else Severity.NONE,
+            currentRom       = smoothAngle,
             peakMotion       = peakMotion,
             incorrect_joints = incorrectJoints,
             holdCountdown    = holdCountdown,
