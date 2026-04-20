@@ -155,7 +155,7 @@ class AnalyticsViewModel @Inject constructor(
         } else 0.0
 
         // Weekly Adherence Logic - Last 7 Days
-        val calendar = Calendar.getInstance()
+        val calendar =Calendar.getInstance()
         calendar.add(Calendar.DAY_OF_YEAR, -7)
         val oneWeekAgo = calendar.time
         
